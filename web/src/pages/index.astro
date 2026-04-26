@@ -1,0 +1,247 @@
+---
+import Base from '../layouts/Base.astro';
+
+const features = [
+  {
+    title: 'Hold a key, anywhere',
+    body: 'Press and hold Fn in any text field. Release. The text appears at your cursor. Works in Safari, Notes, Slack, VS Code, even Terminal.',
+  },
+  {
+    title: 'Local. Always.',
+    body: 'Whisper models compiled to CoreML run entirely on-device. Your voice never leaves your Mac. No accounts, no API keys, no opt-out.',
+  },
+  {
+    title: 'Three quality tiers',
+    body: 'Pick Fast (140 MB), Balanced (210 MB) or High Quality (600 MB). Switch any time — models download on demand.',
+  },
+  {
+    title: 'Multilingual',
+    body: 'English, 中文, 日本語, 한국어 out of the box. Whisper handles code-switched speech better than most cloud transcribers.',
+  },
+  {
+    title: 'Lightweight',
+    body: 'A 5 MB binary plus the model you choose. Lives in your menu bar — no Dock icon, no window stealing focus.',
+  },
+  {
+    title: 'Open source',
+    body: 'Every line on GitHub under MIT. Audit it, fork it, change the hotkey, swap the recognizer.',
+  },
+];
+---
+
+<Base>
+  <main>
+    <header class="hero">
+      <div class="hero-inner">
+        <img src="/icon.png" alt="Scribe" class="hero-icon" width="128" height="128" />
+        <h1>Hold a key. Talk. Get text.</h1>
+        <p class="lead">
+          Local, private, push-to-talk dictation for macOS. Powered by Whisper running
+          entirely on your Mac.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/xiangst0816/scribe/releases/latest">
+            Download for macOS
+          </a>
+          <a class="btn btn-secondary" href="https://github.com/xiangst0816/scribe">
+            View on GitHub
+          </a>
+        </div>
+        <p class="meta">macOS 14+ · Apple Silicon recommended · Free &amp; open source</p>
+      </div>
+    </header>
+
+    <section class="features">
+      <div class="features-inner">
+        {features.map((f) => (
+          <article class="feature">
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section class="how">
+      <div class="how-inner">
+        <h2>How it works</h2>
+        <ol>
+          <li><strong>Install</strong> from <a href="https://github.com/xiangst0816/scribe/releases/latest">Releases</a> or build from source.</li>
+          <li><strong>Grant</strong> Microphone, Speech Recognition, and Accessibility permissions on first launch.</li>
+          <li><strong>Hold Fn</strong>, speak. <strong>Release</strong>. Done.</li>
+        </ol>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>
+        Scribe is open source under the <a href="https://github.com/xiangst0816/scribe/blob/main/LICENSE">MIT license</a>.
+        Speech recognition by <a href="https://github.com/argmaxinc/argmax-oss-swift">WhisperKit</a>.
+      </p>
+    </footer>
+  </main>
+</Base>
+
+<style>
+  main {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Hero */
+  .hero {
+    padding: 80px 24px 56px;
+    background: var(--color-bg);
+  }
+  .hero-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    text-align: center;
+  }
+  .hero-icon {
+    width: 128px;
+    height: 128px;
+    border-radius: 28px;
+    margin: 0 auto 32px;
+    box-shadow: var(--shadow-strong);
+  }
+  .hero h1 {
+    font-size: clamp(40px, 6vw, 72px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    margin-bottom: 20px;
+  }
+  .lead {
+    font-size: clamp(18px, 2vw, 22px);
+    color: var(--color-text-muted);
+    max-width: 640px;
+    margin: 0 auto 36px;
+  }
+  .cta {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 28px;
+    border-radius: 999px;
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform 0.1s ease, background 0.15s ease, color 0.15s ease;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: var(--color-brand);
+    color: #fff;
+  }
+  .btn-primary:hover {
+    background: var(--color-brand-hover);
+    color: #fff;
+  }
+  .btn-secondary {
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+  }
+  .btn-secondary:hover {
+    color: var(--color-text);
+    background: var(--color-border);
+  }
+  .meta {
+    color: var(--color-text-muted);
+    font-size: 14px;
+  }
+
+  /* Features grid */
+  .features {
+    padding: 56px 24px 80px;
+    background: var(--color-bg-muted);
+  }
+  .features-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .feature {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 28px;
+  }
+  .feature h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .feature p {
+    color: var(--color-text-muted);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  /* How it works */
+  .how {
+    padding: 80px 24px;
+  }
+  .how-inner {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .how h2 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  .how ol {
+    list-style: none;
+    counter-reset: step;
+    display: grid;
+    gap: 16px;
+  }
+  .how li {
+    counter-increment: step;
+    padding: 20px 24px;
+    background: var(--color-bg-muted);
+    border-radius: 12px;
+    position: relative;
+    padding-left: 64px;
+    font-size: 16px;
+  }
+  .how li::before {
+    content: counter(step);
+    position: absolute;
+    left: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--color-brand);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: auto;
+    padding: 40px 24px;
+    border-top: 1px solid var(--color-border);
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 14px;
+  }
+</style>

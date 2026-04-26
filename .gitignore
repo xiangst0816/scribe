@@ -1,0 +1,21 @@
+# Swift / Xcode
+.build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+
+# Build artifacts
+Scribe.app/
+VoiceInput.app/
+
+# Logs
+logs/
+*.log
+
+# Web (per-subdir .gitignore also applies)
+web/node_modules/
+web/dist/
+web/.astro/
+
+# macOS
+.DS_Store

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="115" ry="115" fill="#ffffff"/>
+  <g fill="#0A84FF">
+    <!-- Pen nib silhouette: top shoulders + tip -->
+    <path d="M153 102 H359 Q368 102 368 111 V134
+             L256 430
+             L144 134 V111 Q144 102 153 102 Z"/>
+  </g>
+  <!-- Negative space slit + breather hole -->
+  <g fill="#ffffff">
+    <circle cx="256" cy="194" r="20"/>
+    <rect x="246" y="208" width="20" height="206" rx="10"/>
+  </g>
+</svg>
