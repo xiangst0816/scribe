@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="web/public/icon.png" alt="Scribe" width="128" height="128" />
+
 # Scribe
 
 **Hold a key. Talk. Get text — anywhere on your Mac.**
