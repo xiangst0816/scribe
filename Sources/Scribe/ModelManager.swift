@@ -108,7 +108,8 @@ final class ModelManager {
             do {
                 try await download(quality)
             } catch {
-                update(quality, .failed("Download failed: \(error.localizedDescription)"))
+                update(quality, .failed("Download failed"))
+                await fallbackToWorking(skipping: quality)
                 return
             }
         }
@@ -131,8 +132,29 @@ final class ModelManager {
             loadedQuality = quality
             update(quality, .ready)
         } catch {
-            update(quality, .failed("Load failed: \(error.localizedDescription)"))
+            update(quality, .failed("Load failed"))
+            await fallbackToWorking(skipping: quality)
         }
+    }
+
+    /// After a failed quality, switch the active selection to something that works
+    /// so the user can keep dictating instead of being stuck on the broken model.
+    /// The failed quality stays visible in the menu and can be retried by clicking it.
+    private func fallbackToWorking(skipping failed: VoiceQuality) async {
+        // Already have a kit loaded — just promote it to the active selection.
+        if let active = loadedQuality, loadedKit != nil, active != failed {
+            selectedQuality = active
+            update(active, .ready)
+            return
+        }
+        // Otherwise try the first already-downloaded quality.
+        for q in VoiceQuality.allCases where q != failed && isDownloaded(q) {
+            selectedQuality = q
+            await ensureLoadedAsync(q)
+            return
+        }
+        // Nothing else available — leave the failed state visible and let the
+        // Apple Speech fallback handle dictation until the user picks something.
     }
 
     func deleteCached(_ quality: VoiceQuality) {

@@ -261,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .ready:
             line = "\(q.displayName) · Active"
         case .failed(let msg):
-            line = "\(q.displayName) · \(msg)"
+            line = "\(q.displayName) · \(msg) — click to retry"
         }
         item.title = line
     }
@@ -274,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .downloaded: suffix = "  ·  \(q.sizeLabel)  ·  Ready"
         case .loading: suffix = "  ·  Loading…"
         case .ready: suffix = "  ·  \(q.sizeLabel)  ·  In Use"
-        case .failed(let msg): suffix = "  ·  Failed: \(msg)"
+        case .failed: suffix = "  ·  \(q.sizeLabel)  ·  Failed — click to retry"
         }
         return q.displayName + suffix
     }
