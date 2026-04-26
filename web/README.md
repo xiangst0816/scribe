@@ -19,40 +19,33 @@ npm run preview  # serves the built site
 
 ## Deployment
 
-Deployed to **Cloudflare Pages** automatically by [`.github/workflows/deploy-web.yml`](../.github/workflows/deploy-web.yml) on every push to `main` that touches `web/**`.
+Deployed to **GitHub Pages** at <https://xiangst0816.github.io/scribe/> automatically by [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) on every push to `main` that touches `web/**`.
 
-### One-time Cloudflare setup
+### One-time setup
 
-1. **Create a Pages project**
+1. In the repo's **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**.
+2. Push to `main`. The workflow builds with [`withastro/action`](https://github.com/withastro/action) and publishes via [`actions/deploy-pages`](https://github.com/actions/deploy-pages).
 
-   In the [Cloudflare Pages dashboard](https://dash.cloudflare.com/?to=/:account/pages), click **Create a project → Direct upload**, name it `scribe`, and skip the file-upload step (the GitHub Action will populate it on first deploy). You can also let the GitHub Action create the project automatically by simply running once.
+That's it — no secrets, no domain, no DNS.
 
-2. **Get an API token**
+### Subpath caveat
 
-   In **My Profile → API Tokens**, click **Create Token** with the **"Edit Cloudflare Workers"** template, or build a custom token with these permissions:
-   - Account · Cloudflare Pages · **Edit**
-   - User · User Details · **Read**
+Because the site is served under `/scribe/`, [`astro.config.mjs`](./astro.config.mjs) sets `base: '/scribe'`. All internal links must use `import.meta.env.BASE_URL`, e.g.:
 
-3. **Get your Account ID**
+```astro
+<img src={`${import.meta.env.BASE_URL}/icon.png`} />
+```
 
-   Visible in the Cloudflare dashboard right sidebar (any zone or the Workers / Pages overview).
+Hard-coded `/foo` paths will 404 in production.
 
-4. **Add secrets to GitHub**
+### Switching to a custom domain later
 
-   In `xiangst0816/scribe` → **Settings → Secrets and variables → Actions → New repository secret**:
+If you buy a domain (e.g. `scribe.example.com`):
 
-   | Name | Value |
-   |---|---|
-   | `CLOUDFLARE_API_TOKEN` | the token from step 2 |
-   | `CLOUDFLARE_ACCOUNT_ID` | the account ID from step 3 |
-
-5. **Push and watch**
-
-   Any push to `main` that changes `web/**` triggers the workflow, builds the site, and uploads to CF Pages. The first deployment creates the project if missing.
-
-### Custom domain
-
-Once deployed, in the Pages project go to **Custom domains → Set up a custom domain**, add `scribe.xiangst.dev` (or whatever), and CF will guide you through the DNS step. Update `site:` in [`astro.config.mjs`](./astro.config.mjs) to match.
+1. Add `web/public/CNAME` containing the domain.
+2. In **Settings → Pages**, set the custom domain.
+3. Update `site:` in [`astro.config.mjs`](./astro.config.mjs) to the new URL and **remove** `base`.
+4. Revert internal links from `${import.meta.env.BASE_URL}foo` back to `/foo` (or keep them — `BASE_URL` becomes `/` and still works).
 
 ## Structure
 
