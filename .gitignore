@@ -19,3 +19,14 @@ web/.astro/
 
 # macOS
 .DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# MCP / tooling scratch
+.playwright-mcp/
+.cursor/
+
+# Scratch screenshots (Playwright MCP, manual captures)
+typeless-*.png
