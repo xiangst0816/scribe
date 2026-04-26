@@ -5,17 +5,17 @@ final class OverlayPanel: NSPanel {
     private let waveformView = WaveformView()
     private let spinnerView = SpinnerView()
 
-    private let capsuleHeight: CGFloat = 40
-    private let capsuleWidth: CGFloat = 92
-    private let waveSize: CGFloat = 44
-    private let spinnerSize: CGFloat = 18
+    private let capsuleHeight: CGFloat = 34
+    private let capsuleWidth: CGFloat = 78
+    private let waveSize: CGFloat = 38
+    private let spinnerSize: CGFloat = 16
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 92, height: 40),
+            contentRect: NSRect(x: 0, y: 0, width: 78, height: 28),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -76,7 +76,7 @@ final class OverlayPanel: NSPanel {
 
         NSLayoutConstraint.activate([
             waveformView.widthAnchor.constraint(equalToConstant: waveSize),
-            waveformView.heightAnchor.constraint(equalToConstant: 24),
+            waveformView.heightAnchor.constraint(equalToConstant: 16),
             waveformView.centerXAnchor.constraint(equalTo: content.centerXAnchor),
             waveformView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
 
@@ -98,7 +98,7 @@ final class OverlayPanel: NSPanel {
         guard let screen = NSScreen.main else { return }
         let area = screen.visibleFrame
         let x = area.midX - capsuleWidth / 2
-        let y = area.minY + 56
+        let y = area.minY + 32
 
         setFrame(NSRect(x: x, y: y - 14, width: capsuleWidth, height: capsuleHeight), display: true)
         alphaValue = 0
@@ -154,7 +154,7 @@ private final class WaveformView: NSView {
 
     private let barWeights: [CGFloat] = [0.5, 0.8, 1.0, 0.75, 0.55]
     private var smoothedLevel: CGFloat = 0
-    private let minBarFraction: CGFloat = 0.18
+    private let minBarFraction: CGFloat = 0.08
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -185,10 +185,14 @@ private final class WaveformView: NSView {
 
     func setLevel(_ level: CGFloat) {
         guard isAnimating else { return }
-        let attack: CGFloat = 0.4
-        let release: CGFloat = 0.15
-        let factor = level > smoothedLevel ? attack : release
-        smoothedLevel += (level - smoothedLevel) * factor
+        // Boost the input so quiet speech still produces visible swing,
+        // then lift the low end with a sub-linear curve.
+        let amplified = min(level * 1.6, 1.0)
+        let expanded = pow(amplified, 0.55)
+        let attack: CGFloat = 0.65
+        let release: CGFloat = 0.22
+        let factor = expanded > smoothedLevel ? attack : release
+        smoothedLevel += (expanded - smoothedLevel) * factor
 
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.08)

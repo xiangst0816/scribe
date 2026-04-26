@@ -293,18 +293,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         button.title = ""
 
-        let symbol: String
         if isRecording {
-            symbol = "mic.fill"
+            // Keep the mascot logo while recording — the macOS orange mic
+            // privacy indicator already signals that the mic is hot.
+            button.image = Self.idleLogoImage
         } else if isTranscribing {
-            symbol = "waveform"
+            let img = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Transcribing")
+            img?.isTemplate = true
+            button.image = img
         } else {
-            symbol = "mic"
+            button.image = Self.idleLogoImage
         }
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Voice Input")
-        img?.isTemplate = true
-        button.image = img
     }
+
+    /// Mickey-style silhouette of the Scribe mascot — head (r=7) plus two
+    /// round ears (r=4) sitting symmetrically on top. Drawn as a single merged
+    /// path traversing the outer outline of the three-circle union.
+    /// Intersection points are precomputed analytically so the elliptical arc
+    /// commands stitch cleanly. No mask/clip — works with the limited SVG
+    /// support in NSImage's renderer.
+    private static let idleLogoImage: NSImage = {
+        let svg = """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+          <path fill="none" stroke="black" stroke-width="1.6"
+                stroke-linejoin="round" stroke-linecap="round"
+                d="M 4.94 9.498
+                   A 4 4 0 1 1 8.915 6.318
+                   A 7 7 0 0 1 13.085 6.318
+                   A 4 4 0 1 1 17.06 9.498
+                   A 7 7 0 1 1 4.94 9.498 Z"/>
+        </svg>
+        """
+        let data = svg.data(using: .utf8)!
+        let img = NSImage(data: data) ?? NSImage()
+        img.size = NSSize(width: 18, height: 18)
+        img.isTemplate = true
+        img.accessibilityDescription = "Voice Input"
+        return img
+    }()
 
     // MARK: - Actions
 
