@@ -1,6 +1,7 @@
 APP_NAME := Scribe
 APP_BUNDLE := $(APP_NAME).app
 APP_ZIP := $(APP_NAME).zip
+APP_DMG := $(APP_NAME).dmg
 BUILD_DIR := $(shell swift build -c release --show-bin-path 2>/dev/null || echo .build/release)
 VERSION ?=
 # Override these to do a Developer ID build for notarization:
@@ -17,7 +18,7 @@ ifneq ($(strip $(ENTITLEMENTS)),)
   CODESIGN_FLAGS += --entitlements "$(ENTITLEMENTS)"
 endif
 
-.PHONY: build clean install run release
+.PHONY: build clean install run release dmg
 
 build:
 	swift build -c release
@@ -44,7 +45,7 @@ run: build
 
 clean:
 	swift package clean
-	rm -rf $(APP_BUNDLE) $(APP_ZIP)
+	rm -rf $(APP_BUNDLE) $(APP_ZIP) $(APP_DMG)
 
 install: build
 	rm -rf /Applications/$(APP_BUNDLE)
@@ -55,3 +56,26 @@ release: build
 	rm -f $(APP_ZIP)
 	ditto -c -k --keepParent $(APP_BUNDLE) $(APP_ZIP)
 	@echo "✅ Packaged $(APP_ZIP) ($$(du -h $(APP_ZIP) | cut -f1))"
+
+# Builds a styled DMG with an Applications shortcut so users can drag-and-drop
+# install. Requires `brew install create-dmg`. Signs the DMG when CODESIGN_IDENTITY
+# is a real Developer ID — the workflow notarizes & staples it after this step.
+dmg: build
+	@command -v create-dmg >/dev/null || { echo "create-dmg not installed. Run: brew install create-dmg"; exit 1; }
+	rm -f $(APP_DMG)
+	create-dmg \
+		--volname "$(APP_NAME)" \
+		--window-pos 200 120 \
+		--window-size 600 360 \
+		--icon-size 110 \
+		--icon "$(APP_BUNDLE)" 165 180 \
+		--app-drop-link 435 180 \
+		--hide-extension "$(APP_BUNDLE)" \
+		--no-internet-enable \
+		--hdiutil-quiet \
+		"$(APP_DMG)" "$(APP_BUNDLE)"
+	@if [ "$(CODESIGN_IDENTITY)" != "-" ]; then \
+		codesign --force --sign "$(CODESIGN_IDENTITY)" --timestamp "$(APP_DMG)" ; \
+		echo "🔏 Signed $(APP_DMG)" ; \
+	fi
+	@echo "✅ Packaged $(APP_DMG) ($$(du -h $(APP_DMG) | cut -f1))"

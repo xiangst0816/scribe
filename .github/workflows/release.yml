@@ -99,7 +99,10 @@ jobs:
           echo "keychain=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
           echo "Signing as: $IDENTITY"
 
-      - name: Build & package
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build, sign & package (.app + .zip + .dmg)
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           IDENTITY: ${{ steps.keychain.outputs.identity }}
@@ -107,25 +110,33 @@ jobs:
         run: |
           if [ -n "$NO_CERT" ]; then
             make release VERSION="$VERSION"
+            make dmg     VERSION="$VERSION"
           else
             make release VERSION="$VERSION" \
               CODESIGN_IDENTITY="$IDENTITY" \
               ENTITLEMENTS=Scribe.entitlements
+            make dmg     VERSION="$VERSION" \
+              CODESIGN_IDENTITY="$IDENTITY" \
+              ENTITLEMENTS=Scribe.entitlements
           fi
 
-      - name: Notarize & staple
+      - name: Notarize & staple (.app, .dmg)
         if: steps.keychain.outputs.identity != ''
         env:
           APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           APP_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
           TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
         run: |
-          echo "→ Submitting Scribe.zip to notarytool…"
-          xcrun notarytool submit Scribe.zip \
-            --apple-id "$APPLE_ID" \
-            --password "$APP_PASSWORD" \
-            --team-id "$TEAM_ID" \
-            --wait
+          submit() {
+            xcrun notarytool submit "$1" \
+              --apple-id "$APPLE_ID" \
+              --password "$APP_PASSWORD" \
+              --team-id "$TEAM_ID" \
+              --wait
+          }
+
+          echo "→ Notarizing Scribe.zip (covers the .app inside)…"
+          submit Scribe.zip
 
           echo "→ Stapling ticket to Scribe.app…"
           xcrun stapler staple Scribe.app
@@ -135,6 +146,12 @@ jobs:
           echo "→ Re-zipping stapled bundle…"
           rm -f Scribe.zip
           ditto -c -k --keepParent Scribe.app Scribe.zip
+
+          echo "→ Notarizing Scribe.dmg…"
+          submit Scribe.dmg
+          xcrun stapler staple Scribe.dmg
+          xcrun stapler validate Scribe.dmg
+          spctl --assess --type open --context context:primary-signature --verbose=2 Scribe.dmg
 
       - name: Clean up keychain
         if: always() && steps.keychain.outputs.keychain != ''
@@ -146,7 +163,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Scribe-${{ steps.ver.outputs.version }}
-          path: Scribe.zip
+          path: |
+            Scribe.zip
+            Scribe.dmg
           if-no-files-found: error
 
       - name: Create / update GitHub Release
@@ -165,13 +184,15 @@ jobs:
           NOTES="Automated build of \`$TAG\`.
 
           - macOS 14+ · Apple Silicon
+          - **Scribe.dmg** — recommended; double-click and drag into Applications.
+          - **Scribe.zip** — same .app, no installer; unzip and move it yourself.
           $TRUST_LINE
 
           See [README](https://github.com/${REPO}#readme) for setup."
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" Scribe.zip --clobber
+            gh release upload "$TAG" Scribe.zip Scribe.dmg --clobber
           else
-            gh release create "$TAG" Scribe.zip \
+            gh release create "$TAG" Scribe.zip Scribe.dmg \
               --title "Scribe $TAG" \
               --notes "$NOTES"
           fi

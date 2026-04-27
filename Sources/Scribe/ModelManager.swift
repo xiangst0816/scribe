@@ -9,9 +9,9 @@ enum VoiceQuality: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .fast: return "Fast"
-        case .balanced: return "Balanced"
-        case .high: return "High Quality"
+        case .fast: return L10n.t("quality.fast")
+        case .balanced: return L10n.t("quality.balanced")
+        case .high: return L10n.t("quality.high")
         }
     }
 
@@ -82,11 +82,22 @@ final class ModelManager {
     }
 
     func isDownloaded(_ quality: VoiceQuality) -> Bool {
-        let url = modelFolderURL(for: quality)
-        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: url.path) else {
-            return false
+        let folder = modelFolderURL(for: quality)
+        let fm = FileManager.default
+        // A complete WhisperKit model has three CoreML bundles, each containing
+        // both a compiled program (model.mlmodel / model.mil) and its weights.
+        // Any of these missing usually means the download was interrupted.
+        for sub in ["AudioEncoder.mlmodelc", "MelSpectrogram.mlmodelc", "TextDecoder.mlmodelc"] {
+            let bundle = folder.appendingPathComponent(sub, isDirectory: true)
+            let mlmodel = bundle.appendingPathComponent("model.mlmodel")
+            let weights = bundle.appendingPathComponent("weights", isDirectory: true)
+            guard fm.fileExists(atPath: mlmodel.path),
+                  let weightFiles = try? fm.contentsOfDirectory(atPath: weights.path),
+                  !weightFiles.isEmpty else {
+                return false
+            }
         }
-        return !contents.isEmpty
+        return true
     }
 
     // MARK: - Public actions
@@ -108,7 +119,7 @@ final class ModelManager {
             do {
                 try await download(quality)
             } catch {
-                update(quality, .failed("Download failed"))
+                update(quality, .failed(L10n.t("error.downloadFailed")))
                 await fallbackToWorking(skipping: quality)
                 return
             }
@@ -132,6 +143,11 @@ final class ModelManager {
             loadedQuality = quality
             update(quality, .ready)
         } catch {
+            // Cached model files exist but WhisperKit can't load them. Almost
+            // always means a previous download was interrupted and left a
+            // partial bundle. Wipe the cache so the next click re-downloads
+            // cleanly instead of re-failing on the same corrupt files.
+            try? FileManager.default.removeItem(at: modelFolderURL(for: quality))
             update(quality, .failed("Load failed"))
             await fallbackToWorking(skipping: quality)
         }
