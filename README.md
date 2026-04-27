@@ -4,6 +4,8 @@
 
 # Scribe
 
+**English** · [简体中文](README.zh-Hans.md) · [繁體中文](README.zh-Hant.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+
 **Hold a key. Talk. Get text — anywhere on your Mac.**
 
 Local, private, push-to-talk dictation for macOS — powered by [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) running entirely on-device.
