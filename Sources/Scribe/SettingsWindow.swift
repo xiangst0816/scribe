@@ -190,9 +190,12 @@ final class SettingsWindow: NSPanel {
         personaTextView.isAutomaticDashSubstitutionEnabled = false
         personaTextView.delegate = self
         personaTextView.string = coordinator.personaStore.persona
-        // Show placeholder text via NSTextView's private API workaround:
-        // attribute via the field editor's textContainer doesn't help. Use
-        // a faded label overlaid in the future if desired; for now skip.
+        // Belt-and-suspenders text-color setup. `textColor` paints existing
+        // characters; `typingAttributes` controls what NEW typed characters
+        // look like. Without setting both, NSTextView may render typed
+        // characters with a foreground color that's invisible against the
+        // current appearance — that bug shipped in v0.3.4.
+        applyPersonaTextColor()
         personaScrollView.heightAnchor.constraint(equalToConstant: 96).isActive = true
 
         openFolderButton.title = L10n.t("settings.polish.adaptive.openFolder")
@@ -263,7 +266,7 @@ final class SettingsWindow: NSPanel {
         // on. Disable rather than hide so the layout doesn't jump.
         let adaptiveOn = coordinator.isAdaptiveEnabled
         personaTextView.isEditable = adaptiveOn
-        personaTextView.textColor = adaptiveOn ? .labelColor : .disabledControlTextColor
+        applyPersonaTextColor()
         openFolderButton.isEnabled = adaptiveOn
         personaLabel.textColor = adaptiveOn ? .secondaryLabelColor : .tertiaryLabelColor
 
@@ -369,6 +372,23 @@ final class SettingsWindow: NSPanel {
     @objc private func adaptiveToggled() {
         coordinator.isAdaptiveEnabled = (adaptiveCheckbox.state == .on)
         refresh()
+    }
+
+    /// Set both the existing-text color (`textColor`) AND the new-typed-text
+    /// color (`typingAttributes`) on the persona text view. NSTextView keeps
+    /// these as independent properties; setting only `textColor` leaves
+    /// already-empty / freshly-typed text using whatever the typing
+    /// attributes default to (which is appearance-dependent and was rendering
+    /// as effectively-invisible in v0.3.4).
+    private func applyPersonaTextColor() {
+        let color: NSColor = coordinator.isAdaptiveEnabled
+            ? .labelColor
+            : .disabledControlTextColor
+        personaTextView.textColor = color
+        personaTextView.typingAttributes = [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: color,
+        ]
     }
 
     @objc private func openScribeFolder() {
