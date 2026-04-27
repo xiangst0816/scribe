@@ -183,7 +183,11 @@ jobs:
           fi
 
           KEY_FILE="$RUNNER_TEMP/sparkle_priv.txt"
-          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+          # Strip everything that isn't a base64 character. Catches stray newlines
+          # and the zsh `%` "no-newline" display artifact users sometimes copy in.
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | tr -dc 'A-Za-z0-9+/=' > "$KEY_FILE"
+          KEY_LEN=$(wc -c < "$KEY_FILE" | tr -d ' ')
+          echo "Sanitized key file is $KEY_LEN bytes (expected 44 for a 32-byte EdDSA seed)."
 
           # Output looks like: sparkle:edSignature="..." length="12345"
           OUT="$("$SIGN_UPDATE" -f "$KEY_FILE" Scribe.zip)" || RC=$?
