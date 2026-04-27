@@ -90,9 +90,24 @@ final class WhisperSpeechProvider: SpeechProvider {
 
     // MARK: - Private
 
+    /// Drop a segment if its `noSpeechProb` is at or above this. Whisper hallucinates
+    /// canned phrases ("Thank you.", "감사합니다.") on near-silent input even when the
+    /// VAD pre-filter lets the clip through; this catches those per-segment.
+    private static let noSpeechProbCutoff: Float = 0.6
+
     private func transcribe(samples: [Float]) async {
         guard let kit = ModelManager.shared.loadedKit else {
             await deliver(error: "Voice model is not loaded.")
+            return
+        }
+
+        // VAD pre-filter: if the whole buffer has no detectable speech, skip the
+        // model entirely. Whisper otherwise hallucinates training-set boilerplate
+        // like "Thank you for watching" / "3Q" on silent or breath-only input.
+        let speechRanges = EnergyVAD().calculateActiveChunks(in: samples)
+        if speechRanges.isEmpty {
+            NSLog("Scribe transcribe: VAD found no speech in %d samples, skipping", samples.count)
+            await deliver(text: "")
             return
         }
 
@@ -127,15 +142,17 @@ final class WhisperSpeechProvider: SpeechProvider {
                 noSpeechThreshold: nil
             )
             let results = try await kit.transcribe(audioArray: samples, decodeOptions: options)
-            let raw = results.map { $0.text }.joined(separator: " ")
+            let allSegments = results.flatMap { $0.segments }
+            let speechSegments = Self.filterHallucinatedSegments(allSegments)
+            let raw = speechSegments.map { $0.text }.joined(separator: " ")
             let cleaned = Self.cleanupTranscript(raw)
             // Diagnostics — surface model output so empty pastes can be traced
             // (e.g. HQ-only hallucinations getting stripped, or empty result
             // arrays from over-strict no-speech detection). Inspect via:
             //   log show --predicate 'process == "Scribe"' --last 1m
-            NSLog("Scribe transcribe: model=%@ samples=%d results=%d raw=%@ cleaned=%@",
+            NSLog("Scribe transcribe: model=%@ samples=%d segments=%d kept=%d raw=%@ cleaned=%@",
                   ModelManager.shared.loadedQuality?.rawValue ?? "?",
-                  samples.count, results.count,
+                  samples.count, allSegments.count, speechSegments.count,
                   raw.isEmpty ? "<empty>" : raw,
                   cleaned.isEmpty ? "<empty>" : cleaned)
             await deliver(text: cleaned)
@@ -147,6 +164,13 @@ final class WhisperSpeechProvider: SpeechProvider {
     @MainActor
     private func deliver(text: String) {
         onFinalResult?(text)
+    }
+
+    /// Drops segments whose `noSpeechProb` is at or above `noSpeechProbCutoff`.
+    /// Whisper's own per-segment confidence is the most reliable signal we have
+    /// for "this segment is hallucinated boilerplate" — see `noSpeechProbCutoff`.
+    static func filterHallucinatedSegments(_ segments: [TranscriptionSegment]) -> [TranscriptionSegment] {
+        segments.filter { $0.noSpeechProb < noSpeechProbCutoff }
     }
 
     /// Strips Whisper's non-speech annotations like `[笑]`, `(Music)`, `[Applause]`, `♪♪`

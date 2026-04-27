@@ -1,4 +1,5 @@
 import AppKit
+import ScribeCore
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

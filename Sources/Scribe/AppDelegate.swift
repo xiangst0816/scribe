@@ -2,7 +2,9 @@ import AppKit
 import Speech
 import Sparkle
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate {
+    public override init() { super.init() }
+
     private var statusItem: NSStatusItem!
     private let keyMonitor = KeyMonitor()
     private let updaterController = SPUStandardUpdaterController(
@@ -48,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Lifecycle
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    public func applicationDidFinishLaunching(_ notification: Notification) {
         let savedCode = selectedLocaleCode
         if !savedCode.isEmpty {
             appleProvider.locale = Locale(identifier: savedCode)
