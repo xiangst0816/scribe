@@ -1,16 +1,21 @@
 import Foundation
 
-/// On-disk location for downloaded model assets. Centralises the path so
-/// `LocalPolishService`, the (future) downloader, and tests all agree.
+/// On-disk location for the downloaded local-polish model. Centralises the
+/// path so `LocalPolishService`, `ModelDownloader`, and tests all agree.
 ///
-/// We intentionally use `Application Support`, not `Caches`, because a 1 GB
-/// download the user explicitly opted into shouldn't be silently evicted by
-/// the OS under disk pressure.
+/// `Application Support`, not `Caches`: a multi-GB download the user explicitly
+/// opted into shouldn't be silently evicted by the OS under disk pressure.
+///
+/// Names are deliberately model-agnostic (`modelFileName`, `modelURL`) so that
+/// swapping the pinned build is a single-file change in `ModelDescriptor`. The
+/// fileName itself does encode the model identity, so previous downloads land
+/// in different files and can be deleted manually if the user wants the disk
+/// space back — we don't auto-prune.
 enum ModelLocation {
-    /// Pinned to a specific Qwen build. Bumping this forces a fresh download
-    /// (the old file is left on disk for the user to delete manually — we don't
-    /// auto-prune in case they want to roll back).
-    static let qwenFileName = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+    /// Pinned to a specific GGUF build. Bumping this is a deliberate product
+    /// decision (see CLAUDE.md). Old files with previous names are left on
+    /// disk so a user who rolls back doesn't have to re-download.
+    static let modelFileName = "gemma-4-E2B-it-Q4_K_M.gguf"
 
     /// `~/Library/Application Support/Scribe/`
     static var supportDirectory: URL {
@@ -24,19 +29,19 @@ enum ModelLocation {
         supportDirectory.appendingPathComponent("models", isDirectory: true)
     }
 
-    static var qwenURL: URL {
-        modelsDirectory.appendingPathComponent(qwenFileName)
+    static var modelURL: URL {
+        modelsDirectory.appendingPathComponent(modelFileName)
     }
 
-    /// `<file>.partial` and `<file>.partial.meta` belong to the (future)
-    /// download layer — define here so the layer and the cleanup paths share
-    /// the names rather than re-inventing them in two places.
-    static var qwenPartialURL: URL {
-        modelsDirectory.appendingPathComponent(qwenFileName + ".partial")
+    /// `<file>.partial` and `<file>.partial.meta` belong to the download layer
+    /// — defined here so the layer and the cleanup paths share the names rather
+    /// than re-inventing them in two places.
+    static var modelPartialURL: URL {
+        modelsDirectory.appendingPathComponent(modelFileName + ".partial")
     }
 
-    static var qwenPartialMetaURL: URL {
-        modelsDirectory.appendingPathComponent(qwenFileName + ".partial.meta")
+    static var modelPartialMetaURL: URL {
+        modelsDirectory.appendingPathComponent(modelFileName + ".partial.meta")
     }
 
     /// Best-effort directory creation. Returns `false` if we couldn't create it
@@ -55,7 +60,7 @@ enum ModelLocation {
         }
     }
 
-    static func qwenIsPresent() -> Bool {
-        FileManager.default.fileExists(atPath: qwenURL.path)
+    static func modelIsPresent() -> Bool {
+        FileManager.default.fileExists(atPath: modelURL.path)
     }
 }

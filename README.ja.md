@@ -33,7 +33,7 @@ Scribe はメニューバーに常駐します。**Fn** を押しながら話し
 - **末尾バッファ**：`Fn` を離した後も約 500 ミリ秒だけ録音を続けます。語尾を少し言い遅れても切れません。バッファ中に再び `Fn` を押せば、同じ録音を切らさずに延長できます。
 - **多言語対応**：英語、中国語（簡体字/繁体字）、日本語、韓国語に対応。メニューから言語を固定するか、システム設定に従わせられます。
 - **CJK 入力環境に配慮した貼り付け**：貼り付け前に一時的に ASCII 入力ソースへ切り替え、IME が `⌘V` を横取りするのを避けます。
-- **オプションのオンデバイス整形**（既定オフ）：「整形設定」から有効化し、システム内蔵モデル（macOS 26 + Apple Intelligence の対応地域）または Scribe 同梱の Qwen2.5-1.5B ローカルモデル（約 1 GB、ダウンロード）から選べます。どちらの経路も推論はすべて Mac 内で完結し、文字起こしは Mac の外に出ません。
+- **オプションのオンデバイス整形**（既定オフ）：「整形設定」から有効化し、システム内蔵モデル（macOS 26 + Apple Intelligence の対応地域）または Scribe 同梱の Gemma 4 E2B ローカルモデル（約 3.5 GB、ダウンロード）から選べます。どちらの経路も推論はすべて Mac 内で完結し、文字起こしは Mac の外に出ません。
 - **メニューバー専用**：Dock アイコンもメインウィンドウもありません。
 
 ## 動作環境
@@ -97,7 +97,7 @@ make clean          # ビルド成果物を削除
 - 音声認識は Apple 標準の `SFSpeechRecognizer` を使います。Apple Silicon の Mac で Sonoma 以降の場合、対応 4 言語は通常オンデバイスで処理されます。それ以外の条件では、Apple の[音声認識プライバシーポリシー](https://www.apple.com/legal/privacy/data/ja/speech-recognition/)に従って音声が Apple のサーバーに送信されることがあります。
 - オプションの整形機能（既定オフ）には 2 つのエンジンがあり、**推論はいずれも Mac 内で完結します**：
   - *システム* — macOS 内蔵の Apple Intelligence オンデバイスモデル。ダウンロード不要。macOS 26+ かつ対応地域でのみ利用可能。
-  - *Scribe ローカルモデル* — Qwen2.5-1.5B-Instruct（約 1 GB）。初回有効化時に ModelScope または HuggingFace から一度だけダウンロードします。ダウンロード URL と SHA-256 はバイナリに焼き込まれています。ダウンロード後はすべての整形が完全にローカルで実行されます。
+  - *Scribe ローカルモデル* — Gemma 4 E2B-it（約 3.5 GB）。初回有効化時に ModelScope または HuggingFace から一度だけダウンロードします。ダウンロード URL と SHA-256 はバイナリに焼き込まれています。ダウンロード後はすべての整形が完全にローカルで実行されます。
 - 整形を有効化すると、貼り付け前に文字起こしが選択したエンジンを通ります。タイムアウトやエラー時はそのまま元の文字起こしを貼り付けるため、録音内容が失われることはありません。
 - 音声は 1 回のキー押下中（500 ミリ秒の末尾バッファを含む）だけメモリ上に保持され、文字起こし後に破棄されます。
 
@@ -130,7 +130,7 @@ Scribe.app
 ├── Refinement/            ── オプションの文字起こし整形（既定オフ）
 │   ├── PolishCoordinator      ── エンジン仲裁、3 秒タイムアウト、連続失敗時のサーキットブレーカー
 │   ├── SystemPolishService    ── Apple Intelligence（macOS 26+、対応地域のみ）
-│   └── LocalPolishService     ── llama.cpp 経由で Qwen2.5-1.5B GGUF を呼び出し + ダウンロード層
+│   └── LocalPolishService     ── llama.cpp 経由で Gemma 4 E2B GGUF を呼び出し + ダウンロード層
 ├── SettingsWindow         ── 整形のマスタートグル + System/Local エンジン切替
 └── AppDelegate            ── メニューバー UI、ステータスアイコン、録音ライフサイクル
 ```
@@ -143,7 +143,7 @@ llama.cpp は SwiftPM の `binaryTarget` で公式リリースの `xcframework` 
 
 - [Sparkle](https://sparkle-project.org)：自動アップデートフレームワーク。
 - [llama.cpp](https://github.com/ggml-org/llama.cpp)：ローカルモデル推論エンジン（MIT）。
-- [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF)（Alibaba 通義チーム）：ローカル整形モデル（Apache 2.0）。
+- [Gemma 4 E2B-it](https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF)（Google、GGUF 量子化は bartowski 提供）：ローカル整形モデル（Apache 2.0）。
 - Apple [Speech](https://developer.apple.com/documentation/speech) フレームワーク：認識のコア。
 
 ## ライセンス

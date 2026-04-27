@@ -86,8 +86,8 @@ final class LlamaContext {
     }
 
     /// Load model + context into memory. Synchronously runs on the inference
-    /// queue; first call typically takes 0.5–1.5 s on M2 for Qwen2.5-1.5B.
-    /// Subsequent calls are no-ops.
+    /// queue; first call typically takes 1–3 s on M2 for Gemma 4 E2B (~3.46 GB
+    /// mmap). Subsequent calls are no-ops.
     func warmUp() async throws {
         try await onQueue { [self] in
             guard model == nil else { return }
@@ -100,9 +100,10 @@ final class LlamaContext {
 
             var cparams = llama_context_default_params()
             cparams.n_ctx = nCtx
-            // The polish prompt + Qwen ChatML wrapper + few-shot examples is
-            // ~700–900 tokens on the long side; n_batch must fit the whole
-            // prompt-decode pass in one shot or llama_decode aborts with
+            // The polish prompt + Gemma 4 turn wrapper + few-shot examples
+            // is ~700–900 tokens on the long side (similar to the old Qwen
+            // ChatML build); n_batch must fit the whole prompt-decode pass
+            // in one shot or llama_decode aborts with
             // "n_tokens_all <= cparams.n_batch". 2048 leaves headroom for
             // future prompt growth without paying for the full 4096 ctx.
             cparams.n_batch = 2048
@@ -115,8 +116,9 @@ final class LlamaContext {
         }
     }
 
-    /// Run a single prompt → completion. Stops at EOS, the Qwen end-of-message
-    /// tokens, or `maxNewTokens` — whichever comes first.
+    /// Run a single prompt → completion. Stops at EOS, any model-specific
+    /// end-of-turn tokens (e.g. Gemma 4's `<turn|>`), or `maxNewTokens` —
+    /// whichever comes first.
     ///
     /// `prompt` is the fully-templated text including chat-format wrappers.
     /// The caller (PolishPrompt) owns formatting decisions.
@@ -144,8 +146,8 @@ final class LlamaContext {
         // between unrelated dictations).
         llama_memory_clear(llama_get_memory(ctx), true)
 
-        // Tokenize the prompt. Allocate generously — Qwen ChatML wrappers add
-        // ~10 tokens around a typical 30-token transcript.
+        // Tokenize the prompt. Allocate generously — Gemma 4 turn wrappers
+        // add ~10 tokens around a typical 30-token transcript.
         let cstr = prompt.cString(using: .utf8) ?? []
         let cstrLen = Int32(cstr.count - 1)  // exclude trailing NUL
         var tokens = [llama_token](repeating: 0, count: max(Int(cstrLen) + 32, 64))

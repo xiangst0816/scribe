@@ -1,10 +1,16 @@
 import Foundation
 
-/// Local GGUF backend (Qwen2.5-1.5B-Instruct via llama.cpp).
+/// Local GGUF backend (Gemma 4 E2B-it via llama.cpp).
 ///
 /// Tracks the lifecycle from "not downloaded" → downloading → verifying →
 /// ready, plus failure modes from the design doc §4.4. Inference runs off-main
 /// via `LlamaContext`; the coordinator wraps every call in a 3 s hard timeout.
+///
+/// Why Gemma 4 E2B (vs Qwen2.5-1.5B in v0.3.x): see [docs/polish-model-eval.md].
+/// The 1.5B model failed adversarial cases for persona-leak, question-answering,
+/// and multilingual-preservation; E2B (~2B active params, ~5B total in MatFormer)
+/// passed 33/36 cases vs Qwen's effective ~22-24/36, at the cost of ~3.46 GB
+/// download (vs ~1 GB).
 @MainActor
 final class LocalPolishService: PolishService {
     let backend: PolishBackend = .local
@@ -25,7 +31,7 @@ final class LocalPolishService: PolishService {
     var isReady: Bool { downloadState == .ready }
     var statusText: String { LocalPolishService.localizedStatus(for: downloadState) }
 
-    private let descriptor: ModelDescriptor = .qwen25_1_5B_Instruct_Q4_K_M
+    private let descriptor: ModelDescriptor = .gemma4_E2B_it_Q4_K_M
     private let downloader = ModelDownloader.shared
     private var context: LlamaContext?
     private var contextWarmedUp: Bool = false
@@ -37,7 +43,7 @@ final class LocalPolishService: PolishService {
 
     /// Re-check the model file on disk + reset stale context. Cheap.
     func refreshAvailability() {
-        if ModelLocation.qwenIsPresent() {
+        if ModelLocation.modelIsPresent() {
             downloadState = .ready
         } else if case .downloading = downloadState {
             // Already downloading; don't clobber.
@@ -89,7 +95,7 @@ final class LocalPolishService: PolishService {
         guard isReady else {
             throw PolishError.unavailable(statusText)
         }
-        let ctx = self.context ?? LlamaContext(modelPath: ModelLocation.qwenURL.path)
+        let ctx = self.context ?? LlamaContext(modelPath: ModelLocation.modelURL.path)
         self.context = ctx
         if !contextWarmedUp {
             do {
@@ -111,9 +117,9 @@ final class LocalPolishService: PolishService {
         guard let ctx = context else {
             throw PolishError.unavailable(statusText)
         }
-        let prompt = Self.chatMLPrompt(system: systemPrompt, user: raw)
+        let prompt = Self.gemma4Prompt(system: systemPrompt, user: raw)
         let result = try await ctx.generate(prompt: prompt)
-        return Self.cleanQwenOutput(result)
+        return Self.cleanGemmaOutput(result)
     }
 
     // MARK: - Downloader observation
@@ -195,20 +201,28 @@ final class LocalPolishService: PolishService {
         }
     }
 
-    // MARK: - Qwen ChatML formatting
+    // MARK: - Gemma 4 turn formatting
 
-    /// Qwen2.5 follows the ChatML format. EOS / `<|im_end|>` are already in
-    /// the model's EOG token set, so we don't need to inject explicit stop
-    /// tokens.
+    /// Gemma 4 uses an entirely new turn structure (NOT the Gemma 3
+    /// `<start_of_turn>` format). Verified against
+    /// `google/gemma-4-E4B-it/chat_template.jinja`:
     ///
-    /// The raw dictation goes inside <RAW>…</RAW> markers, prefixed with a
-    /// fresh "polish, don't answer" reminder. This restructures the `user`
-    /// turn from "user is asking the model" into "user is telling the model
-    /// to polish a string". Without this, ChatML's conversational pull plus
-    /// persona context made the 1.5B model use persona facts to answer
-    /// questions in the raw text (v0.3.7: persona "我是向松涛" + dictation
-    /// "你知道我是谁吗" → bad output "我知道你是向松涛").
-    private static func chatMLPrompt(system: String, user: String) -> String {
+    /// - Open: `<|turn>system\n` / `<|turn>user\n` / `<|turn>model\n`
+    /// - Close: `<turn|>\n`     (asymmetric pipes are intentional)
+    /// - BOS is added automatically by `llama_tokenize(add_special: true)`
+    /// - We deliberately omit the `<|think|>` token to keep thinking mode OFF
+    ///   — E2B/E4B produce no `<|channel>thought` block when thinking is
+    ///   disabled, so we don't pay the latency or risk of reasoning leaking
+    ///   to the user's cursor under timeout.
+    ///
+    /// Raw dictation is wrapped in `<RAW>...</RAW>` markers with a fresh
+    /// "polish, don't answer" preamble. This restructures the `user` turn
+    /// from "user asks model" → "user tells model to polish a string" — the
+    /// failure mode prevented is the v0.3.7 case where persona "我是向松涛" +
+    /// dictation "你知道我是谁吗" produced "我知道你是向松涛" (persona-leak).
+    /// Gemma 4 E2B passes that case without the wrapper too, but we keep
+    /// the belt-and-suspenders.
+    private static func gemma4Prompt(system: String, user: String) -> String {
         let wrapped = """
             Polish the dictation between <RAW> markers. Output ONLY the
             cleaned-up version of what's between the markers, in the same
@@ -220,18 +234,34 @@ final class LocalPolishService: PolishService {
             </RAW>
             """
         return """
-        <|im_start|>system
-        \(system)<|im_end|>
-        <|im_start|>user
-        \(wrapped)<|im_end|>
-        <|im_start|>assistant
+        <|turn>system
+        \(system)<turn|>
+        <|turn>user
+        \(wrapped)<turn|>
+        <|turn>model
 
         """
     }
 
-    private static func cleanQwenOutput(_ raw: String) -> String {
+    /// Strip Gemma 4 turn / channel tokens plus a defensive sweep of legacy
+    /// markers (Qwen ChatML, generic BOS/EOS, our `<RAW>` wrappers) just in
+    /// case the model emits them. Also drops any `<|channel>thought ... <channel|>`
+    /// block — E2B with thinking disabled is documented not to emit these,
+    /// but a one-line guard prevents reasoning text from ever reaching the
+    /// user's cursor if a future build regresses.
+    private static func cleanGemmaOutput(_ raw: String) -> String {
         var s = raw
-        for marker in ["<|im_end|>", "<|im_start|>", "<|endoftext|>",
+        while let openRange = s.range(of: "<|channel>thought") {
+            if let closeRange = s.range(of: "<channel|>", range: openRange.upperBound..<s.endIndex) {
+                s.removeSubrange(openRange.lowerBound..<closeRange.upperBound)
+            } else {
+                s.removeSubrange(openRange.lowerBound..<s.endIndex)
+                break
+            }
+        }
+        for marker in ["<|turn>", "<turn|>", "<|channel>", "<channel|>",
+                       "<|im_end|>", "<|im_start|>", "<|endoftext|>",
+                       "<bos>", "<eos>",
                        "<RAW>", "</RAW>"] {
             s = s.replacingOccurrences(of: marker, with: "")
         }

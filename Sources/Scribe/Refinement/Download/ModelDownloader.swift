@@ -1,6 +1,7 @@
 import Foundation
 
-/// Downloads the local Qwen GGUF with mirror fallback, cross-launch resume,
+/// Downloads the local-polish GGUF (Gemma 4 E2B) with mirror fallback,
+/// cross-launch resume,
 /// and SHA-256 verification. Implements the failure matrix in design doc §4.4.
 ///
 /// Threading: not `@MainActor`. URLSession delegate callbacks fire on the
@@ -97,9 +98,9 @@ final class ModelDownloader: NSObject {
 
         // If we already have a finalised file that matches the descriptor,
         // verify and short-circuit — no need to re-download.
-        if FileManager.default.fileExists(atPath: ModelLocation.qwenURL.path) {
+        if FileManager.default.fileExists(atPath: ModelLocation.modelURL.path) {
             transition(to: .verifying)
-            verifyAndFinalize(at: ModelLocation.qwenURL)
+            verifyAndFinalize(at: ModelLocation.modelURL)
             return
         }
 
@@ -138,7 +139,7 @@ final class ModelDownloader: NSObject {
     /// file is corrupt or stale. NOT called automatically.
     func purge() {
         cancel()
-        try? FileManager.default.removeItem(at: ModelLocation.qwenURL)
+        try? FileManager.default.removeItem(at: ModelLocation.modelURL)
         cleanPartialFiles()
         transition(to: .idle)
     }
@@ -160,11 +161,11 @@ final class ModelDownloader: NSObject {
             return
         }
         let mirror = mirrorChain[mirrorIndex]
-        var req = URLRequest(url: mirror.qwenURL)
+        var req = URLRequest(url: mirror.modelURL)
         req.httpMethod = "GET"
 
         // Resume from existing .partial if present.
-        let partialURL = ModelLocation.qwenPartialURL
+        let partialURL = ModelLocation.modelPartialURL
         if let attrs = try? FileManager.default.attributesOfItem(atPath: partialURL.path),
            let size = attrs[.size] as? Int64, size > 0 {
             req.setValue("bytes=\(size)-", forHTTPHeaderField: "Range")
@@ -181,7 +182,7 @@ final class ModelDownloader: NSObject {
     // MARK: - Resume from meta
 
     private func tryResumeFromMeta(for descriptor: ModelDescriptor) -> Bool {
-        guard let raw = try? Data(contentsOf: ModelLocation.qwenPartialMetaURL),
+        guard let raw = try? Data(contentsOf: ModelLocation.modelPartialMetaURL),
               let json = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               let savedSize = (json["expected_size"] as? NSNumber)?.int64Value,
               let savedHash = json["expected_sha256"] as? String,
@@ -197,26 +198,26 @@ final class ModelDownloader: NSObject {
 
     private func writePartialMeta(descriptor: ModelDescriptor) {
         let dict: [String: Any] = [
-            "url":              mirrorChain[mirrorIndex].qwenURL.absoluteString,
+            "url":              mirrorChain[mirrorIndex].modelURL.absoluteString,
             "expected_size":    descriptor.expectedSize,
             "expected_sha256":  descriptor.expectedSHA256,
             "started_at":       ISO8601DateFormatter().string(from: Date()),
         ]
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted]) {
-            try? data.write(to: ModelLocation.qwenPartialMetaURL, options: .atomic)
+            try? data.write(to: ModelLocation.modelPartialMetaURL, options: .atomic)
         }
     }
 
     private func persistResumeData(_ data: Data) {
-        try? data.write(to: ModelLocation.qwenPartialURL.appendingPathExtension("resumeData"),
+        try? data.write(to: ModelLocation.modelPartialURL.appendingPathExtension("resumeData"),
                         options: .atomic)
     }
 
     private func cleanPartialFiles() {
         let fm = FileManager.default
-        try? fm.removeItem(at: ModelLocation.qwenPartialURL)
-        try? fm.removeItem(at: ModelLocation.qwenPartialMetaURL)
-        try? fm.removeItem(at: ModelLocation.qwenPartialURL.appendingPathExtension("resumeData"))
+        try? fm.removeItem(at: ModelLocation.modelPartialURL)
+        try? fm.removeItem(at: ModelLocation.modelPartialMetaURL)
+        try? fm.removeItem(at: ModelLocation.modelPartialURL.appendingPathExtension("resumeData"))
     }
 
     // MARK: - Verify & finalise
@@ -275,7 +276,7 @@ extension ModelDownloader: URLSessionDownloadDelegate {
         let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : totalBytesExpected
         // For Range responses, totalBytesExpectedToWrite is just the remaining
         // bytes; combine with whatever the .partial already had on disk.
-        let already = (try? FileManager.default.attributesOfItem(atPath: ModelLocation.qwenPartialURL.path))?[.size] as? Int64 ?? 0
+        let already = (try? FileManager.default.attributesOfItem(atPath: ModelLocation.modelPartialURL.path))?[.size] as? Int64 ?? 0
         let observed = already + totalBytesWritten
         transition(to: .downloading(bytesReceived: observed, totalBytes: max(total, totalBytesExpected)))
     }
@@ -296,7 +297,7 @@ extension ModelDownloader: URLSessionDownloadDelegate {
         // If we resumed via Range (206 Partial Content), append the new bytes
         // onto the existing .partial; otherwise, the new file IS the partial.
         let fm = FileManager.default
-        let dest = ModelLocation.qwenPartialURL
+        let dest = ModelLocation.modelPartialURL
         do {
             if (downloadTask.response as? HTTPURLResponse)?.statusCode == 206,
                fm.fileExists(atPath: dest.path) {
@@ -317,7 +318,7 @@ extension ModelDownloader: URLSessionDownloadDelegate {
         }
 
         // Promote .partial → final file, then verify.
-        let finalURL = ModelLocation.qwenURL
+        let finalURL = ModelLocation.modelURL
         do {
             if fm.fileExists(atPath: finalURL.path) {
                 try fm.removeItem(at: finalURL)

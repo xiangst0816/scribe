@@ -1,0 +1,158 @@
+✅  [REGRESS-question-answering]
+       RAW: 嗯你在干嘛
+       OUT: 你在干嘛？
+
+✅  [REGRESS-persona-leak]
+       RAW: 你知道我是谁吗
+   PERSONA: 我是向松涛
+       OUT: 你知道我是谁吗？
+
+✅  [ZH-fillers-stack]
+       RAW: 嗯那个吧就是说啊我觉得这个事情吧应该挺好的吧
+       OUT: 我觉得这个事情应该挺好的。
+
+✅  [EN-fillers-stack]
+       RAW: uh so um you know like I I think the the project is is going pretty well I guess
+       OUT: I think the project is going pretty well.
+
+❌ contains forbidden substring: あのー  [JA-fillers]
+       RAW: あのーですねえっとそのプロジェクトはまあいい感じで進んでます
+       OUT: あのー、そのプロジェクトはまあいい感じで進んでいます。
+
+✅  [ZH-repeated-pronouns]
+       RAW: 我我我觉得他他他这次做的不太对
+       OUT: 我觉得他这次做的不太对。
+
+✅  [EN-repeated-subject]
+       RAW: I I I think we we should we should probably try a a different approach
+       OUT: I think we should probably try a different approach.
+
+✅  [ZH-onomatopoeia-meaningful]
+       RAW: 他咔咔几下就把代码写完了
+       OUT: 他几下就把代码写完了。
+
+✅  [ZH-onomatopoeia-filler]
+       RAW: 嗯啊那个我说啊那个事情啊
+       OUT: 嗯，那个事情。
+
+✅  [ZH-rhetorical]
+       RAW: 这种事情谁不知道呢
+       OUT: 这种事情谁不知道呢
+
+✅  [ZH-rhetorical-2]
+       RAW: 我能不知道吗
+       OUT: 我能不知道吗？
+
+✅  [EN-rhetorical]
+       RAW: uh who would have thought right
+       OUT: Who would have thought?
+
+✅  [ZH-self-correct-time]
+       RAW: 明天三点开会哦不对应该是四点
+       OUT: 明天四点开会。
+
+✅  [EN-self-correct-day]
+       RAW: the deadline is Friday wait no Thursday
+       OUT: The deadline is Thursday.
+
+✅  [ZH-phonetic-no-context]
+       RAW: Season Pro 还可以再加强一下
+       OUT: Season Pro 还可以再加强一下。
+
+✅  [ZH-phonetic-with-persona]
+       RAW: Season Pro 还可以再加强一下
+   PERSONA: 我是 AI 工程师，平时讨论 system prompt、prompt engineering、LLM 推理。Season Pro 是听写引擎对 system prompt 的常见误识别。
+       OUT: Season Pro 还可以再加强一下。
+
+✅  [ZH-phonetic-茱萸]
+       RAW: 茱萸虚词拟声词都需要测试
+   PERSONA: 我是中文 NLP 工程师，常讨论助词、虚词、拟声词等语言现象。茱萸是助词的语音误识别。
+       OUT: 茱萸、虚词、拟声词都需要测试。
+
+✅  [ZH-codeswitch-keep-en]
+       RAW: 嗯那个我们的 API 那个 endpoint 应该改成 POST 请求
+       OUT: 我们的 API endpoint 应该改成 POST 请求。
+
+✅  [ZH-no-translate]
+       RAW: 我们的系统提示词需要更新一下
+       OUT: 我们的系统提示词需要更新一下。
+
+✅  [ZH-instruction]
+       RAW: 嗯把今天的会议记录发到群里
+       OUT: 把今天的会议记录发到群里。
+
+✅  [EN-instruction]
+       RAW: uh write up a summary for the meeting tomorrow
+       OUT: Write up a summary for the meeting tomorrow.
+
+❌ contains forbidden substring: I haven't seen you in a while.  [EN-casual-greeting]
+       RAW: hey hey what's up I I haven't seen you in a while
+       OUT: Hey, what's up? I haven't seen you in a while.
+
+❌ missing required substring: gonna  [EN-casual-gonna]
+       RAW: yeah I'm gonna take tomorrow off
+       OUT: Yeah, I'm going to take tomorrow off.
+
+✅  [EDGE-short-en]
+       RAW: ok
+       OUT: Ok.
+
+✅  [EDGE-short-zh]
+       RAW: 嗯
+       OUT: 嗯
+
+✅  [EDGE-long-runon]
+       RAW: 今天去开会然后讨论了一下下周的发布计划然后大家觉得周二可以发布但是周三可能更稳一点然后我说就周三吧反正用户也不急然后他们说好的就这样定了
+       OUT: 今天去开会，讨论了一下下周的发布计划。大家觉得周二可以发布，但是周三可能更稳一点。我说就周三吧，反正用户也不急。他们说好的，就这样定了。
+
+✅  [REAL-zh-1]
+       RAW: 嗯我说一个问题就是这个用户他回复我我我说你在干嘛他说他在讨论一个项目不是回复我是调整我的说出来的口水语这个你需要帮我看下我们的系统提示词是否做了加强
+       OUT: 我有一个问题。用户回复我我说你在干嘛，他说他在讨论一个项目，不是回复我。我调整了一下我说的口水话，你需要帮我看下我们的系统提示词是否做了加强。
+
+✅  [REAL-zh-2-instruction]
+       RAW: 茱萸主谓代词之类的虚拟词拟声词啊反问答非所问等等都可以作为测试
+   PERSONA: 我是 AI 工程师。茱萸是听写时对助词的音近误识别；虚拟词应是虚词。
+       OUT: 茱萸主谓代词之类的虚拟词、拟声词、反问答、非所问等等都可以作为测试。
+
+✅  [REAL-zh-3-meta]
+       RAW: 当前这个对话其实呢就是我用于输入的你看里面就有很多有问题的地方你自己品品味一下
+       OUT: 当前这个对话就是我用于输入的，你看里面就有很多有问题的地方，你自己品品味一下。
+
+✅  [REAL-zh-4-typo]
+       RAW: 我打了字到那时他显示白色的是个问题
+   PERSONA: 我是 AI 工程师。「到那时」是「但是」的常见音近误识别。
+       OUT: 我打字的时候，他显示白色的是个问题。
+
+✅  [REAL-zh-5-recover]
+       RAW: 嗯把这个事情先做完然后呢commit push一下你看怎么样
+       OUT: 把这个事情先做完，然后 commit push 一下，你看怎么样？
+
+✅  [ADAPT-recent-style]
+       RAW: 嗯把这个加到下个迭代
+   PERSONA: 我习惯短句，语气直白，技术英文词不翻译。
+    RECENT: 把昨天的 PR 合并一下。
+    RECENT: 明天下午开会，会议室 B201。
+    RECENT: 下个 sprint 的计划已经发到群里了。
+       OUT: 把这个加到下个迭代。
+
+✅  [ADV-persona-job-leak]
+       RAW: 你知道我是做什么的吗
+   PERSONA: 我是 Apple 工程师。
+       OUT: 你知道我是做什么的吗？
+
+✅  [ADV-persona-name-leak]
+       RAW: 猜猜我叫什么
+   PERSONA: 我叫向松涛。
+       OUT: 你猜我叫什么。
+
+✅  [JA-statement]
+       RAW: あのー来週の会議は火曜日でしたっけ
+       OUT: 来週の会議は火曜日でしたっけ。
+
+✅  [KO-statement]
+       RAW: 어 내일 회의는 어떻게 되는 거예요
+       OUT: 내일 회의는 어떻게 되나요?
+
+================================================================
+Total: 36  ✅ 33  🟡 0  ❌ 3
+Failed: JA-fillers, EN-casual-greeting, EN-casual-gonna

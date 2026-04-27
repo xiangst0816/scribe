@@ -1,14 +1,14 @@
 import Foundation
 
-/// Download source for the local Qwen GGUF. Per design doc §4.2, the download
-/// layer tries mirrors in order; users in `zh-CN` / `zh-TW` get ModelScope
-/// first (faster + works without VPN in mainland China), everyone else gets
-/// HuggingFace first.
+/// Download source for the local-polish GGUF. Per design doc §4.2, the
+/// download layer tries mirrors in order; users in `zh-CN` / `zh-TW` get
+/// ModelScope first (faster + works without VPN in mainland China), everyone
+/// else gets HuggingFace first.
 ///
-/// All mirrors point at the **same file**. The SHA-256 baked into
-/// `ModelDescriptor` must match the bytes from any mirror; a hash mismatch
-/// means CDN poisoning or a model version bump and is treated as a fatal
-/// download failure (see ModelDownloader).
+/// All mirrors point at the **same file** — the bartowski quant of Gemma 4
+/// E2B-it Q4_K_M. The SHA-256 baked into `ModelDescriptor` must match the
+/// bytes from any mirror; a hash mismatch means CDN poisoning or a model
+/// version bump and is treated as a fatal download failure (see ModelDownloader).
 enum ModelMirror: String, CaseIterable {
     case modelScope
     case huggingFace
@@ -23,15 +23,16 @@ enum ModelMirror: String, CaseIterable {
         }
     }
 
-    /// URL for the Qwen2.5-1.5B-Instruct-Q4_K_M GGUF on this mirror.
-    var qwenURL: URL {
+    /// URL for the pinned GGUF on this mirror. All three mirror the same
+    /// `bartowski/google_gemma-4-E2B-it-GGUF` upload.
+    var modelURL: URL {
         switch self {
         case .modelScope:
-            return URL(string: "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf")!
+            return URL(string: "https://modelscope.cn/models/bartowski/google_gemma-4-E2B-it-GGUF/resolve/master/google_gemma-4-E2B-it-Q4_K_M.gguf")!
         case .huggingFace:
-            return URL(string: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf")!
+            return URL(string: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf")!
         case .hfMirror:
-            return URL(string: "https://hf-mirror.com/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf")!
+            return URL(string: "https://hf-mirror.com/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf")!
         }
     }
 }
@@ -79,13 +80,15 @@ struct ModelDescriptor {
     let expectedSize: Int64
     let expectedSHA256: String
 
-    /// The Qwen build Phase B targets. Pinned against the official ModelScope
-    /// mirror's `qwen2.5-1.5b-instruct-q4_k_m.gguf` (Qwen team upload).
-    /// Bumping these is a deliberate product decision — see CLAUDE.md.
-    static let qwen25_1_5B_Instruct_Q4_K_M = ModelDescriptor(
-        fileName: ModelLocation.qwenFileName,
-        expectedSize: 1_117_320_736,
-        expectedSHA256: "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
+    /// Gemma 4 E2B-it Q4_K_M (~3.46 GB) from `bartowski/google_gemma-4-E2B-it-GGUF`.
+    /// Switched from Qwen2.5-1.5B in the v0.4.x line after probe runs showed
+    /// E2B handled persona-leak / question-answering / multilingual-preservation
+    /// adversarial cases that Qwen 1.5B failed on
+    /// (see [docs/polish-model-eval.md](../../../../docs/polish-model-eval.md)).
+    static let gemma4_E2B_it_Q4_K_M = ModelDescriptor(
+        fileName: ModelLocation.modelFileName,
+        expectedSize: 3_462_677_760,
+        expectedSHA256: "cded614c9b24be92e5a868d2ba38fb24e15dfea34fc650193c475a6debc233a7"
     )
 
     /// `true` when the descriptor is fully pinned and the integrity check
