@@ -20,13 +20,18 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        # macos-15 ships Xcode 16 by default, which provides Swift 6 — required by
+        # swift-jinja >= 2.0 (a transitive dep of WhisperKit / argmax-oss-swift).
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+          swift --version
 
       - name: Resolve version
         id: ver
