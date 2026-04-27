@@ -114,8 +114,17 @@ final class WhisperSpeechProvider: SpeechProvider {
             )
             let results = try await kit.transcribe(audioArray: samples, decodeOptions: options)
             let raw = results.map { $0.text }.joined(separator: " ")
-            let text = Self.cleanupTranscript(raw)
-            await deliver(text: text)
+            let cleaned = Self.cleanupTranscript(raw)
+            // Diagnostics — surface model output so empty pastes can be traced
+            // (e.g. HQ-only hallucinations getting stripped, or empty result
+            // arrays from over-strict no-speech detection). Inspect via:
+            //   log show --predicate 'process == "Scribe"' --last 1m
+            NSLog("Scribe transcribe: model=%@ samples=%d results=%d raw=%@ cleaned=%@",
+                  ModelManager.shared.loadedQuality?.rawValue ?? "?",
+                  samples.count, results.count,
+                  raw.isEmpty ? "<empty>" : raw,
+                  cleaned.isEmpty ? "<empty>" : cleaned)
+            await deliver(text: cleaned)
         } catch {
             await deliver(error: error.localizedDescription)
         }
