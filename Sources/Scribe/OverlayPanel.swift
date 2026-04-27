@@ -135,10 +135,13 @@ final class OverlayPanel: NSPanel {
         transcriptLabel.translatesAutoresizingMaskIntoConstraints = false
         transcriptLabel.font = .systemFont(ofSize: 13, weight: .regular)
         transcriptLabel.textColor = NSColor.white.withAlphaComponent(0.95)
-        // Single line, ellipsised at the tail. Segmenting by punctuation is
-        // handled upstream by `currentSentence(from:)`; the pill always shows
-        // the current sentence, never wraps to 3 lines.
-        transcriptLabel.lineBreakMode = .byTruncatingTail
+        // Single line, ellipsised at the **head**, not the tail. The user is
+        // mid-sentence and the words on the right are the ones they just
+        // said — those should always stay visible, with `…` eating the older
+        // beginning when the sentence overruns the pill width. Punctuation-
+        // based segmenting upstream in `currentSentence(from:)` keeps the
+        // visible text scoped to the current sentence.
+        transcriptLabel.lineBreakMode = .byTruncatingHead
         transcriptLabel.maximumNumberOfLines = 1
         transcriptLabel.alignment = .center
         transcriptBackground.addSubview(transcriptLabel)
