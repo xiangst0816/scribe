@@ -197,12 +197,33 @@ final class LocalPolishService: PolishService {
 
     // MARK: - Qwen ChatML formatting
 
+    /// Qwen2.5 follows the ChatML format. EOS / `<|im_end|>` are already in
+    /// the model's EOG token set, so we don't need to inject explicit stop
+    /// tokens.
+    ///
+    /// The raw dictation goes inside <RAW>…</RAW> markers, prefixed with a
+    /// fresh "polish, don't answer" reminder. This restructures the `user`
+    /// turn from "user is asking the model" into "user is telling the model
+    /// to polish a string". Without this, ChatML's conversational pull plus
+    /// persona context made the 1.5B model use persona facts to answer
+    /// questions in the raw text (v0.3.7: persona "我是向松涛" + dictation
+    /// "你知道我是谁吗" → bad output "我知道你是向松涛").
     private static func chatMLPrompt(system: String, user: String) -> String {
+        let wrapped = """
+            Polish the dictation between <RAW> markers. Output ONLY the
+            cleaned-up version of what's between the markers, in the same
+            language as the dictation. Do not answer or react to it. Do not
+            include the markers in your output.
+
+            <RAW>
+            \(user)
+            </RAW>
+            """
         return """
         <|im_start|>system
         \(system)<|im_end|>
         <|im_start|>user
-        \(user)<|im_end|>
+        \(wrapped)<|im_end|>
         <|im_start|>assistant
 
         """
@@ -210,7 +231,8 @@ final class LocalPolishService: PolishService {
 
     private static func cleanQwenOutput(_ raw: String) -> String {
         var s = raw
-        for marker in ["<|im_end|>", "<|im_start|>", "<|endoftext|>"] {
+        for marker in ["<|im_end|>", "<|im_start|>", "<|endoftext|>",
+                       "<RAW>", "</RAW>"] {
             s = s.replacingOccurrences(of: marker, with: "")
         }
         return PolishPrompt.stripCommonPreface(s)
