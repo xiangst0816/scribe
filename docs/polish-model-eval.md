@@ -115,23 +115,69 @@ prompt 还有空间能优化的：
 | 许可 | 中 | 想要 Apache 2.0 / MIT，不要带商业限制条款 |
 | ChatML 兼容 | 低 | 不兼容也能改 LocalPolishService 的模板，1 小时活 |
 
-### 2.2 候选清单
+### 2.2 候选清单（含 Gemma 4，2026-04-27 重新核实）
 
-> 数据基于 2026-04 公开发布信息和我对这些模型架构的认识；具体效果**必须实测**才能下定论。
+> Gemma 4 在 2026-04-02 发布，比当前晚 3 周。Apache 2.0 许可（Gemma 2/3 是 Gemma-specific license，Gemma 4 改成完全开放）。**关键反直觉**：Gemma 4 用 "E2B / E4B" 命名指**有效参数量**（per-token MoE 激活量），但 GGUF 文件大小由**总参数量**决定，所以 E2B 体积远比 Qwen 2B 大。
 
-| 模型 | 参数 | Q4 体积 | 许可 | CJK | 我的预期（待实测）|
+| 模型 | 参数 | Q4_K_M 体积 | 许可 | CJK | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| **Qwen2.5-1.5B-Instruct** ⬅ 当前 | 1.5B | ~0.95 GB | Apache 2.0 | 强（阿里原生）| 已知问题见 §1.3 |
-| Qwen2.5-3B-Instruct | 3B | ~1.8 GB | Apache 2.0 | 强 | **重点候选** — 同家族 2x 容量，是「容量瓶颈 vs 架构问题」的关键控制变量 |
-| Qwen2.5-7B-Instruct | 7B | ~4.4 GB | Apache 2.0 | 强 | M2 上 30-token 输出 ~2-3s，**贴近 3s 软上限**，体积也大；备选 |
-| **Qwen3-4B-Instruct**（如已发布稳定 GGUF）| 4B | ~2.4 GB | Apache 2.0 | 强 | 新一代，指令遵循通常显著好于 2.5；**重点候选** |
-| Qwen3-1.7B-Instruct | 1.7B | ~1.0 GB | Apache 2.0 | 强 | 同 size 但新一代，看是否能压住 1.5B 的问题 |
-| **Gemma 2 2B-Instruct** | 2B | ~1.5 GB | Gemma 许可（商用 OK 但有禁止条款）| 中 | 用户提名做对比；多语种比 Qwen 弱，但训练数据更干净，幻觉可能更少 |
-| Gemma 3 1B / 4B | 1B/4B | ~0.6/2.5 GB | Gemma 许可 | 中 | 2025 新一代，对话能力较 G2 强；CJK 是否够用要测 |
-| Phi-3.5-mini-instruct | 3.8B | ~2.2 GB | MIT | 中 | 英文非常强，CJK 中等；**幻觉历史**有名 |
-| Llama 3.2-1B-Instruct | 1B | ~0.75 GB | Llama 3 许可 | 弱 | 体积有诱惑，但 CJK 表现弱；**不推荐做主力**，只做对比 |
-| Llama 3.2-3B-Instruct | 3B | ~1.8 GB | Llama 3 许可 | 中 | 同上，3B 版 CJK 略好但仍弱于 Qwen |
-| DeepSeek-R1-Distill-Qwen-1.5B | 1.5B | ~0.95 GB | MIT | 强 | 基于 Qwen 蒸馏，强化推理；指令遵循是否赢 1.5B 原版**值得一测** |
+| **Qwen2.5-1.5B-Instruct** ⬅ 当前 | 1.5B | 0.95 GB | Apache 2.0 | 强（阿里原生）| 已知问题见 §1.3 |
+| Qwen2.5-3B-Instruct | 3B | ~1.8 GB | Apache 2.0 | 强 | 同家族 2x 容量；**控制变量**首选 |
+| Qwen2.5-7B-Instruct | 7B | ~4.4 GB | Apache 2.0 | 强 | 30-token 输出 ~2–3s，贴近 3s 软上限 |
+| **Qwen3-1.7B-Instruct** | 1.7B（1.4B 非 embedding）| ~1.0 GB | Apache 2.0 | 强 | 比 Qwen2.5-1.5B 新一代；同 size 直接对比 |
+| **Qwen3-4B-Instruct** | 4B | ~2.4 GB | Apache 2.0 | 强 | 新一代+大容量；指令遵循通常胜 2.5 |
+| **Gemma 4 E2B-it** ⬅ 用户指名 | **5B 总 / ~2B active (MoE)** | **~3 GB** | **Apache 2.0** ✓ | 中-强（140+ 语言原生预训练）| **比 Qwen2.5-3B 文件还大** |
+| Gemma 4 E4B-it | 8B 总 / ~4B active (MoE) | **5.34 GB** | Apache 2.0 | 中-强 | **比 Qwen2.5-7B 还大**，对首次下载体验不友好 |
+| Gemma 4 26B-A4B | 26B 总 / 4B active (MoE) | ~16 GB | Apache 2.0 | 中-强 | 太大，超出首次下载预算 |
+| Phi-3.5-mini-instruct | 3.8B | ~2.2 GB | MIT | 中 | 英文强，CJK 中等；幻觉历史 |
+| Llama 3.2-3B-Instruct | 3B | ~1.8 GB | Llama 3 许可 | 弱 | CJK 弱于 Qwen，仅作对比 |
+| DeepSeek-R1-Distill-Qwen-1.5B | 1.5B | ~0.95 GB | MIT | 强 | 基于 Qwen 蒸馏强化推理 |
+
+### 2.2.1 Gemma 4 vs Qwen 直接对照（用户最关心）
+
+按 Polish 实际场景的关键维度排：
+
+| 维度 | Qwen2.5-1.5B（当前）| Qwen2.5-3B | Qwen3-4B | **Gemma 4 E2B** | **Gemma 4 E4B** |
+| --- | --- | --- | --- | --- | --- |
+| Q4 文件大小 | 0.95 GB | ~1.8 GB | ~2.4 GB | **~3 GB** | **5.34 GB** |
+| 体积 vs 当前 | 1× | 1.9× | 2.5× | **3.2×** | **5.6×** |
+| 上下文窗口 | 32K | 32K | 32K（推测）| **128K** | **128K** |
+| 多语种声明 | ~30 well-supported | 同 | 同 | **140+ 原生**（claim）| 同 |
+| CJK 训练强度 | 阿里原生（中文母语级）| 同 | 同 | 多语种均匀（**中文未必比 Qwen 强**）| 同 |
+| 许可 | Apache 2.0 | Apache 2.0 | Apache 2.0 | **Apache 2.0** ✓（终于改了）| Apache 2.0 |
+| MoE 推理特点 | 非 MoE（dense）| dense | dense | **MoE 5B 激活 ~2B** — 内存占 5B，每 token 计算 ~2B | MoE 8B/4B |
+| 首次下载体验 | ✓ 1 GB 可接受 | ✓ 1.8 GB 可忍 | ⚠ 2.4 GB 偏大 | ⚠⚠ **3 GB**（隐形门槛）| ❌ 5.34 GB 不可接受 |
+| App bundle 影响 | 0（运行时下）| 0 | 0 | 0 | 0 |
+| Polish 延迟（M2 估算）| 24 tok/s ≈ 1.2s | ~12 tok/s ≈ 2.5s | ~10 tok/s ≈ 3s 边缘 | **~15 tok/s ≈ 2s**（MoE 算激活）| ~8 tok/s ≈ 3.5s **超** |
+
+**Gemma 4 E2B 表面上是最直接的"换 Gemma"选择，但有几个真正的 trade-off：**
+
+1. **体积**：3 GB 是 Qwen 1.5B 的 3 倍，比 Qwen2.5-3B 还大。不是「轻量替代」。
+2. **CJK**：Gemma 系列声明 140+ 语言，但**未公开过中文 benchmark 跑赢 Qwen**。Qwen 是阿里中文母语训练的，这是它的家门口优势。换 Gemma 在中文上**很可能反而退步**。
+3. **MoE 内存模型**：E2B 加载时内存占 5B 模型大小（~3 GB Q4 内存），但每个 token 推理只激活 2B 等效参数。延迟跟 dense 2B 差不多，但内存占用是 dense 5B。M2 24G 完全够，不是问题。
+4. **指令遵循**：Gemma 系列在过去版本 instruction-following 比同 size Qwen 弱（Gemma 2 2B vs Qwen2.5-1.5B 多个 benchmark 落后）。Gemma 4 是否反转**得测**。
+
+**结论候选**（按性价比排序）：
+
+```
+A. Qwen2.5-3B-Instruct（1.8 GB）
+   理由：同家族放大；保持中文母语优势；体积可接受。
+   是「容量是不是瓶颈」的最干净对照实验。
+
+B. Qwen3-1.7B-Instruct（1.0 GB）
+   理由：同 size 但新一代；看新版指令遵循是否能压住 1.5B 的问题。
+   是「新一代 prompt 跟随是不是更好」的对照实验。
+
+C. Gemma 4 E2B-it（3 GB）          ⬅ 用户指名
+   理由：跨家族对照；140+ 语言；许可终于 Apache 2.0；新模型架构。
+   要警惕：CJK 不一定强于 Qwen，体积是 3 倍。
+
+D. Qwen3-4B-Instruct（2.4 GB）
+   理由：新一代 + 大容量，是「最佳 Qwen 路线」候选。
+
+E. Gemma 4 E4B（5.34 GB）和 Qwen2.5-7B（4.4 GB）：
+   都太大，超出"首次下载 1 GB"的隐含约定。先不测。
+```
 
 ### 2.3 用户关注点 → 候选侧重
 
@@ -143,28 +189,33 @@ prompt 还有空间能优化的：
 - **persona-aware 音近字纠错** —— 极强的上下文推理能力，**1.5-3B 都可能做不到**，建议：Qwen2.5-7B 或干脆放弃这个目标
 - **Gemma 对比的价值** —— 不在于它一定更好，而在于**作为不同家族的对照**，能告诉我们「问题是 Qwen 特有还是小模型通病」
 
-### 2.4 推荐的实测排序（按"信息量 ÷ 成本"）
+### 2.4 推荐的实测排序（用户指名 Gemma 4，按性价比排序）
 
-每个候选的成本 ~= 下载（1-3 min）+ probe 跑 36 个 case（~50 sec）+ 人工核对（~5 min）。
+每个候选的成本 ~= 下载（GGUF 大小决定，1-3 min）+ probe 跑 36 个 case（~1 min）+ 人工核对（~5 min）。
 
 ```
-推荐 Round 1（实测 3 个，约 20 分钟）：
+推荐 Round 1（实测 3 个，约 25-30 分钟）：
 
-  1. Qwen2.5-3B-Instruct-Q4_K_M
-     → 最直接的「容量是否够」实验。如果 3B 能解决 50% 以上的 §1.3 失败，
-       那答案就是「上 3B」，不用换家族。
+  1. Qwen2.5-3B-Instruct-Q4_K_M（1.8 GB 下载）
+     → 最干净的「容量是否够」实验。同家族 2x；保持中文母语优势。
+       如果 3B 解决 50%+ 的 §1.3 失败，结论就是「上 3B」，结束。
 
-  2. Qwen3-4B-Instruct-Q4_K_M（如有稳定 GGUF）
-     → 测试「新一代是否对小模型痛点有改进」。如果 4B 全过，
-       那 Phase 5.x 直接定 Qwen3-4B。
+  2. Gemma 4 E2B-it-Q4_K_M（~3 GB 下载）  ⬅ 用户指名
+     → 跨家族对照。要重点观察：
+        a. CJK 输出是否被"翻译化"（Gemma 训练数据更倾向英文化输出）
+        b. JA/KO → ZH 翻译 bug 是否消失（多语种 140+ 是 Gemma 4 强项）
+        c. Polish 延迟是否仍在 3s 内
+        d. persona-leak 是否被压住（更大模型更可能能压）
 
-  3. Gemma 2 2B-IT-Q4_K_M
-     → 用户指定的对照。看跨家族结果。如果 Gemma 在 CJK 上
-       远弱于 Qwen，那 Gemma 路线否决；如果接近，留作备选。
+  3. Qwen3-1.7B-Instruct-Q4_K_M（1.0 GB 下载）
+     → 同 size 不同代对照。如果 Qwen3-1.7B 都比 Qwen2.5-1.5B 好，
+       那"换 Qwen3 系列"是几乎零成本的升级路径。
 
 Round 2（视 Round 1 结论决定）：
-  - 如果 Round 1 仍未解决 persona-leak / JA→ZH，上 Qwen2.5-7B
-  - 如果 Round 1 都比 1.5B 强但仍有问题，看 DeepSeek-R1-Distill
+  - 如果三个都不够，上 Qwen3-4B（2.4 GB）
+  - 如果 Gemma 4 E2B 有 CJK 倒退，Gemma 路线整体否决
+  - persona-leak 如果三个候选都过不了，确认是「设计目标不可达」，
+    需要在产品层面收紧 persona 写法的指引（不是技术问题）
 ```
 
 ### 2.5 实测协议
