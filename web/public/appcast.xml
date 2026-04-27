@@ -1,0 +1,23 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     version="2.0">
+  <channel>
+    <title>Scribe</title>
+    <link>https://xiangst0816.github.io/scribe/appcast.xml</link>
+    <description>Scribe — local dictation for macOS.</description>
+    <language>en</language>
+    <item>
+      <title>Version 0.2.2</title>
+      <link>https://github.com/xiangst0816/scribe/releases/tag/v0.2.2</link>
+      <sparkle:version>0.2.2</sparkle:version>
+      <sparkle:shortVersionString>0.2.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 27 Apr 2026 03:28:14 +0000</pubDate>
+      <enclosure url="https://github.com/xiangst0816/scribe/releases/download/v0.2.2/Scribe.zip"
+                 sparkle:edSignature="9gjHrwax9iZO6aWUrAYcyMlL+YUdGFnWVByWS3WZ7iOz5NMdNsnMPr+BYtwLyYM6A8IP56hGl+cMm0dwltwIAw=="
+                 length="3428937"
+                 type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>

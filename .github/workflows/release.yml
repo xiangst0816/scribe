@@ -226,11 +226,13 @@ jobs:
           PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')" \
             python3 scripts/update_appcast.py
 
-          if git diff --quiet -- web/public/appcast.xml; then
+          # Stage first so newly-created files (the very first release) are
+          # also visible to the change check — `git diff` alone misses untracked.
+          git add web/public/appcast.xml
+          if git diff --cached --quiet -- web/public/appcast.xml; then
             echo "No appcast.xml changes to commit."
             exit 0
           fi
-          git add web/public/appcast.xml
           git commit -m "Publish Sparkle appcast for ${TAG}"
           git push origin main
 
