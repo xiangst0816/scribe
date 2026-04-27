@@ -34,6 +34,16 @@ concurrency:
 
 jobs:
   build:
+    # Custom name surfaces the version in tools that show jobs but not run-name
+    # (the VSCode "GitHub Actions" extension is one such case — its sidebar
+    # shows only `#NN` for the run but renders this job name in full).
+    name: >-
+      Build Scribe ${{
+        github.event_name == 'push' && github.ref_name
+        || (github.event.inputs.version != ''
+            && github.event.inputs.version
+            || format('manual run #{0}', github.run_number))
+      }}
     runs-on: macos-15
     timeout-minutes: 60
     steps:
