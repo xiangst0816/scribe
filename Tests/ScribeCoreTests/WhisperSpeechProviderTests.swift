@@ -89,3 +89,26 @@ final class WhisperSpeechProviderTests: XCTestCase {
         TranscriptionSegment(text: text, noSpeechProb: noSpeechProb)
     }
 }
+
+final class VoiceQualityTests: XCTestCase {
+
+    func testSystemQualityHasNoModelArtifacts() {
+        XCTAssertFalse(VoiceQuality.system.usesWhisper)
+        XCTAssertEqual(VoiceQuality.system.modelVariant, "")
+        XCTAssertEqual(VoiceQuality.system.sizeLabel, "")
+    }
+
+    func testWhisperTiersUseWhisper() {
+        for q in [VoiceQuality.fast, .balanced, .high] {
+            XCTAssertTrue(q.usesWhisper, "\(q) should be a Whisper tier")
+            XCTAssertFalse(q.modelVariant.isEmpty)
+            XCTAssertFalse(q.sizeLabel.isEmpty)
+        }
+    }
+
+    // The menu lists qualities in `allCases` order; `.system` must come first
+    // so the user sees the no-download option at the top.
+    func testSystemListedFirst() {
+        XCTAssertEqual(VoiceQuality.allCases.first, .system)
+    }
+}

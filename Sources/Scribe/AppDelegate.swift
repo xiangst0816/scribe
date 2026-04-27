@@ -105,8 +105,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard isEnabled, !isRecording, !isTranscribing else { return }
 
-        // Choose Whisper if ready, else fall back to Apple Speech.
-        let provider: SpeechProvider = whisperProvider.isReady ? whisperProvider : appleProvider
+        // Honour the user's voice-quality choice. `.system` forces Apple Speech;
+        // the Whisper tiers prefer the loaded model and fall back to Apple if
+        // the kit isn't ready (still downloading, failed, etc.).
+        let provider: SpeechProvider
+        if ModelManager.shared.selectedQuality == .system {
+            provider = appleProvider
+        } else {
+            provider = whisperProvider.isReady ? whisperProvider : appleProvider
+        }
         activeProvider = provider
 
         isRecording = true
@@ -319,17 +326,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func formatQualityRow(_ q: VoiceQuality, state: ModelState) -> String {
+        // `.system` has no download size, so suppress the size dot entirely.
+        let sizePart = q.sizeLabel.isEmpty ? "" : "  ·  \(q.sizeLabel)"
         let suffix: String
         switch state {
-        case .notDownloaded:      suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.download"))"
+        case .notDownloaded:      suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.download"))"
         case .downloading(let p): suffix = "  ·  " + String(format: L10n.t("quality.suffix.downloading"), Int(p * 100))
-        case .downloaded:         suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.ready"))"
+        case .downloaded:         suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.ready"))"
         case .loading(let elapsed):
             suffix = elapsed > 0
                 ? "  ·  " + String(format: L10n.t("quality.suffix.loadingElapsed"), elapsed)
                 : "  ·  \(L10n.t("quality.suffix.loading"))"
-        case .ready:              suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.inUse"))"
-        case .failed:             suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.failed"))"
+        case .ready:              suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.inUse"))"
+        case .failed:             suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.failed"))"
         }
         return q.displayName + suffix
     }

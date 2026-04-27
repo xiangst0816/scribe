@@ -2,31 +2,40 @@ import Foundation
 import WhisperKit
 
 /// User-facing voice quality tier. The internal model name is hidden from the UI.
-enum VoiceQuality: String, CaseIterable {
+public enum VoiceQuality: String, CaseIterable {
+    case system      // Apple Speech (SFSpeechRecognizer) — no download, OS-built-in.
     case fast        // openai_whisper-base       ~140 MB
     case balanced    // openai_whisper-small_216MB ~210 MB
     case high        // openai_whisper-large-v3-v20240930_626MB ~600 MB
 
+    /// True for tiers that actually download a Whisper model. The `.system` tier
+    /// uses Apple's built-in recognizer and is treated as always-ready.
+    var usesWhisper: Bool { self != .system }
+
     var displayName: String {
         switch self {
+        case .system: return L10n.t("quality.system")
         case .fast: return L10n.t("quality.fast")
         case .balanced: return L10n.t("quality.balanced")
         case .high: return L10n.t("quality.high")
         }
     }
 
-    /// Approximate download size, shown in the menu.
+    /// Approximate download size, shown in the menu. Empty for `.system`.
     var sizeLabel: String {
         switch self {
+        case .system: return ""
         case .fast: return "140 MB"
         case .balanced: return "210 MB"
         case .high: return "600 MB"
         }
     }
 
-    /// WhisperKit model variant name on HuggingFace.
+    /// WhisperKit model variant name on HuggingFace. Empty for `.system`,
+    /// which never reaches the download/load path.
     var modelVariant: String {
         switch self {
+        case .system: return ""
         case .fast: return "openai_whisper-base"
         case .balanced: return "openai_whisper-small_216MB"
         case .high: return "openai_whisper-large-v3-v20240930_626MB"
@@ -66,7 +75,12 @@ final class ModelManager {
 
     private init() {
         for q in VoiceQuality.allCases {
-            states[q] = isDownloaded(q) ? .downloaded : .notDownloaded
+            if !q.usesWhisper {
+                // System recognizer ships with macOS — always ready, never downloads.
+                states[q] = .ready
+            } else {
+                states[q] = isDownloaded(q) ? .downloaded : .notDownloaded
+            }
         }
     }
 
@@ -113,6 +127,17 @@ final class ModelManager {
     }
 
     func ensureLoadedAsync(_ quality: VoiceQuality) async {
+        // `.system` uses Apple Speech and has no model to download or load.
+        // Just demote any previously-active Whisper kit so the menu's "In Use"
+        // marker moves cleanly off the old row, and mark this row ready.
+        if !quality.usesWhisper {
+            if let previous = loadedQuality, previous != quality {
+                update(previous, .downloaded)
+            }
+            update(quality, .ready)
+            return
+        }
+
         if loadedQuality == quality, loadedKit != nil {
             update(quality, .ready)
             return
@@ -186,7 +211,7 @@ final class ModelManager {
             return
         }
         // Otherwise try the first already-downloaded quality.
-        for q in VoiceQuality.allCases where q != failed && isDownloaded(q) {
+        for q in VoiceQuality.allCases where q.usesWhisper && q != failed && isDownloaded(q) {
             selectedQuality = q
             await ensureLoadedAsync(q)
             return
