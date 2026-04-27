@@ -13,7 +13,7 @@ final class SettingsWindow: NSPanel {
             backing: .buffered,
             defer: false
         )
-        title = "LLM Refinement Settings"
+        title = L10n.t("settings.title")
         isReleasedWhenClosed = false
         setupUI()
         loadSettings()
@@ -27,7 +27,7 @@ final class SettingsWindow: NSPanel {
         apiKeyField.placeholderString = "sk-..."
         modelField.placeholderString = "gpt-4o-mini"
 
-        let labels = ["API Base URL:", "API Key:", "Model:"].map { text -> NSTextField in
+        let labels = [L10n.t("settings.apiBaseURL"), L10n.t("settings.apiKey"), L10n.t("settings.model")].map { text -> NSTextField in
             let label = NSTextField(labelWithString: text)
             label.alignment = .right
             return label
@@ -48,10 +48,10 @@ final class SettingsWindow: NSPanel {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        let testButton = NSButton(title: "Test", target: self, action: #selector(test))
+        let testButton = NSButton(title: L10n.t("settings.test"), target: self, action: #selector(test))
         testButton.bezelStyle = .rounded
 
-        let saveButton = NSButton(title: "Save", target: self, action: #selector(save))
+        let saveButton = NSButton(title: L10n.t("settings.save"), target: self, action: #selector(save))
         saveButton.keyEquivalent = "\r"
         saveButton.bezelStyle = .rounded
 
@@ -94,16 +94,16 @@ final class SettingsWindow: NSPanel {
 
         let refiner = LLMRefiner.shared
         guard refiner.isConfigured else {
-            showStatus("API key is empty", success: false)
+            showStatus(L10n.t("settings.apiKeyEmpty"), success: false)
             return
         }
 
-        showStatus("Testing...", success: nil)
+        showStatus(L10n.t("settings.testing"), success: nil)
 
         refiner.refine("Hello, this is a test.", force: true) { [weak self] result in
             switch result {
             case .success(let text):
-                self?.showStatus("OK: \(text)", success: true)
+                self?.showStatus(String(format: L10n.t("settings.testOK"), text), success: true)
             case .failure(let error):
                 self?.showStatus(error.localizedDescription, success: false)
             }

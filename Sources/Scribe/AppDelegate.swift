@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var enableMenuItem: NSMenuItem!
     private var statusInfoItem: NSMenuItem!
+    private var langMenuItem: NSMenuItem!
+    private var systemDefaultLangItem: NSMenuItem!
+    private var qualityMenuItem: NSMenuItem!
+    private var quitMenuItem: NSMenuItem!
     private var qualityItems: [VoiceQuality: NSMenuItem] = [:]
     private var languageItems: [NSMenuItem] = []
 
@@ -39,13 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appleProvider.locale = Locale(identifier: savedCode)
         }
         whisperProvider.languageHint = whisperLanguageHint(from: savedCode)
+        L10n.setLanguage(localeCode: savedCode)
 
         setupStatusBar()
         setupProviderCallbacks()
 
         AppleSpeechProvider.requestPermissions { [weak self] granted, errorMsg in
             if !granted, let msg = errorMsg {
-                self?.showAlert(title: "Permission Required", message: msg)
+                self?.showAlert(title: L10n.t("alert.permissionRequired"), message: msg)
             }
         }
 
@@ -124,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appleProvider.onError = onError
         appleProvider.onFinalResult = onFinal
         appleProvider.onLocaleUnavailable = { [weak self] msg in
-            self?.showAlert(title: "Language Unavailable", message: msg)
+            self?.showAlert(title: L10n.t("alert.languageUnavailable"), message: msg)
         }
 
         whisperProvider.onAudioLevel = onLevel
@@ -179,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        enableMenuItem = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
+        enableMenuItem = NSMenuItem(title: L10n.t("menu.enabled"), action: #selector(toggleEnabled), keyEquivalent: "")
         enableMenuItem.target = self
         enableMenuItem.state = .on
         menu.addItem(enableMenuItem)
@@ -187,29 +192,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         // Language submenu (Apple Speech fallback only)
-        let langItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
+        langMenuItem = NSMenuItem(title: L10n.t("menu.language"), action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
-        let languages: [(String, String)] = [
-            ("System Default", ""),
-            ("English (US)", "en-US"),
-            ("中文 (简体)", "zh-CN"),
-            ("中文 (繁體)", "zh-TW"),
-            ("日本語", "ja-JP"),
-            ("한국어", "ko-KR"),
+        // (display title, locale code, isSystemDefault)
+        let languages: [(String, String, Bool)] = [
+            (L10n.t("menu.systemDefault"), "",      true),
+            ("English (US)",               "en-US", false),
+            ("中文 (简体)",                "zh-CN", false),
+            ("中文 (繁體)",                "zh-TW", false),
+            ("日本語",                     "ja-JP", false),
+            ("한국어",                     "ko-KR", false),
         ]
-        for (name, code) in languages {
+        for (name, code, isSystem) in languages {
             let item = NSMenuItem(title: name, action: #selector(changeLanguage(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = code
             item.state = code == selectedLocaleCode ? .on : .off
             languageItems.append(item)
+            if isSystem { systemDefaultLangItem = item }
             langMenu.addItem(item)
         }
-        langItem.submenu = langMenu
-        menu.addItem(langItem)
+        langMenuItem.submenu = langMenu
+        menu.addItem(langMenuItem)
 
         // Voice Quality submenu
-        let qualityItem = NSMenuItem(title: "Voice Quality", action: nil, keyEquivalent: "")
+        qualityMenuItem = NSMenuItem(title: L10n.t("menu.voiceQuality"), action: nil, keyEquivalent: "")
         let qualityMenu = NSMenu()
         for q in VoiceQuality.allCases {
             let item = NSMenuItem(title: "", action: #selector(changeQuality(_:)), keyEquivalent: "")
@@ -218,14 +225,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             qualityItems[q] = item
             qualityMenu.addItem(item)
         }
-        qualityItem.submenu = qualityMenu
-        menu.addItem(qualityItem)
+        qualityMenuItem.submenu = qualityMenu
+        menu.addItem(qualityMenuItem)
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Scribe", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
+        quitMenuItem = NSMenuItem(title: L10n.t("menu.quit"), action: #selector(quit), keyEquivalent: "q")
+        quitMenuItem.target = self
+        menu.addItem(quitMenuItem)
 
         statusItem.menu = menu
 
@@ -248,35 +255,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let q = ModelManager.shared.selectedQuality
         let state = ModelManager.shared.states[q] ?? .notDownloaded
 
-        let line: String
+        let detail: String
         switch state {
         case .notDownloaded:
-            line = "\(q.displayName) · Not downloaded"
+            detail = L10n.t("status.notDownloaded")
         case .downloading(let p):
-            line = "\(q.displayName) · Downloading \(Int(p * 100))% — using fallback"
+            detail = String(format: L10n.t("status.downloadingFallback"), Int(p * 100))
         case .downloaded:
-            line = "\(q.displayName) · Ready"
+            detail = L10n.t("status.ready")
         case .loading:
-            line = "\(q.displayName) · Loading model…"
+            detail = L10n.t("status.loadingModel")
         case .ready:
-            line = "\(q.displayName) · Active"
+            detail = L10n.t("status.active")
         case .failed(let msg):
-            line = "\(q.displayName) · \(msg) — click to retry"
+            detail = String(format: L10n.t("status.failedRetrySuffix"), msg)
         }
-        item.title = line
+        item.title = "\(q.displayName) · \(detail)"
     }
 
     private func formatQualityRow(_ q: VoiceQuality, state: ModelState) -> String {
         let suffix: String
         switch state {
-        case .notDownloaded: suffix = "  ·  \(q.sizeLabel)  ·  Download"
-        case .downloading(let p): suffix = "  ·  Downloading \(Int(p * 100))%"
-        case .downloaded: suffix = "  ·  \(q.sizeLabel)  ·  Ready"
-        case .loading: suffix = "  ·  Loading…"
-        case .ready: suffix = "  ·  \(q.sizeLabel)  ·  In Use"
-        case .failed: suffix = "  ·  \(q.sizeLabel)  ·  Failed — click to retry"
+        case .notDownloaded:      suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.download"))"
+        case .downloading(let p): suffix = "  ·  " + String(format: L10n.t("quality.suffix.downloading"), Int(p * 100))
+        case .downloaded:         suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.ready"))"
+        case .loading:            suffix = "  ·  \(L10n.t("quality.suffix.loading"))"
+        case .ready:              suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.inUse"))"
+        case .failed:             suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.failed"))"
         }
         return q.displayName + suffix
+    }
+
+    /// Re-apply current localization to all static menu titles. Quality rows
+    /// and the status info line are refreshed via `refreshQualityMenu()`.
+    private func relocalizeStaticMenu() {
+        enableMenuItem?.title = L10n.t("menu.enabled")
+        langMenuItem?.title = L10n.t("menu.language")
+        qualityMenuItem?.title = L10n.t("menu.voiceQuality")
+        quitMenuItem?.title = L10n.t("menu.quit")
+        systemDefaultLangItem?.title = L10n.t("menu.systemDefault")
     }
 
     private func updateStatusIcon() {
@@ -363,6 +380,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for item in languageItems {
             item.state = (item.representedObject as? String) == code ? .on : .off
         }
+
+        L10n.setLanguage(localeCode: code)
+        relocalizeStaticMenu()
+        refreshQualityMenu()
     }
 
     @objc private func changeQuality(_ sender: NSMenuItem) {
@@ -382,17 +403,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showAccessibilityAlert() {
         let alert = NSAlert()
-        alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = """
-            Scribe needs Accessibility permission to monitor the Fn key.
-
-            1. Open System Settings → Privacy & Security → Accessibility
-            2. Add Scribe and toggle it on
-            3. Return to this app — it will retry automatically
-            """
+        alert.messageText = L10n.t("alert.accessibilityTitle")
+        alert.informativeText = L10n.t("alert.accessibilityBody")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: L10n.t("alert.openSystemSettings"))
+        alert.addButton(withTitle: L10n.t("alert.later"))
 
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
@@ -407,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.t("alert.ok"))
         alert.runModal()
     }
 }
