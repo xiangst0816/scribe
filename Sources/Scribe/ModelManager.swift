@@ -139,6 +139,11 @@ final class ModelManager {
                 download: false
             )
             let kit = try await WhisperKit(config)
+            // Demote the previously-loaded variant so the menu doesn't keep
+            // showing two "In Use" rows after the user switches qualities.
+            if let previous = loadedQuality, previous != quality {
+                update(previous, .downloaded)
+            }
             loadedKit = kit
             loadedQuality = quality
             update(quality, .ready)
