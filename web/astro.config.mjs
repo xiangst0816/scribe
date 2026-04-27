@@ -10,4 +10,11 @@ export default defineConfig({
     assets: '_astro',
   },
   compressHTML: true,
+  i18n: {
+    defaultLocale: 'zh',
+    locales: ['zh', 'en', 'ja', 'es', 'fr'],
+    routing: {
+      prefixDefaultLocale: false,
+    },
+  },
 });
