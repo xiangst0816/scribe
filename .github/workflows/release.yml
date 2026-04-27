@@ -1,5 +1,17 @@
 name: Release macOS app
 
+# Show the version in the Actions sidebar so each run is identifiable at a
+# glance instead of being a generic "#NN". `run-name` is evaluated *before*
+# any step runs, so it can't read step outputs — we recompute the version
+# inline from the same inputs the "Resolve version" step uses below.
+run-name: >-
+  Release ${{
+    github.event_name == 'push' && github.ref_name
+    || (github.event.inputs.version != ''
+        && github.event.inputs.version
+        || format('manual run #{0}', github.run_number))
+  }}
+
 on:
   push:
     tags:
