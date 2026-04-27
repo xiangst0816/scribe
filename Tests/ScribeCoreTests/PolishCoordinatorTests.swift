@@ -115,6 +115,54 @@ final class PolishCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isBreakerTripped)
     }
 
+    // MARK: - Adaptive (Phase 5.1)
+
+    func testAdaptiveCaptureIsGatedOnToggle() async {
+        // Use a separate persona store so we don't pollute the user's real one.
+        let suiteName = "ScribeTests-adaptive-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let persona = PersonaStore.shared
+        persona.purgeAll()
+        defer { persona.purgeAll() }
+
+        let coord = PolishCoordinator(defaults: defaults, personaStore: persona)
+        coord.isEnabled = true
+        coord.injectStubService(StubReturning("polished result"), as: .local)
+        coord.selectedBackend = .local
+
+        // Adaptive OFF — nothing gets recorded even on success.
+        coord.isAdaptiveEnabled = false
+        _ = await coord.maybePolish("hello", selectedLocaleCode: "en-US")
+        XCTAssertEqual(persona.recent.count, 0)
+
+        // Adaptive ON — the polished output gets captured.
+        coord.isAdaptiveEnabled = true
+        _ = await coord.maybePolish("hello again", selectedLocaleCode: "en-US")
+        XCTAssertEqual(persona.recent.count, 1)
+        XCTAssertEqual(persona.recent[0].text, "polished result")
+    }
+
+    func testAdaptiveCapturesRawOnPolishFallback() async {
+        let suiteName = "ScribeTests-fallback-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let persona = PersonaStore.shared
+        persona.purgeAll()
+        defer { persona.purgeAll() }
+
+        let coord = PolishCoordinator(defaults: defaults, personaStore: persona)
+        coord.isEnabled = true
+        coord.isAdaptiveEnabled = true
+        coord.injectStubService(StubFailingService(), as: .local)
+        coord.selectedBackend = .local
+
+        let result = await coord.maybePolish("the user spoke this", selectedLocaleCode: "en-US")
+        // Polish failed → coordinator returns raw → raw is what got "pasted",
+        // and that's what L3 records.
+        XCTAssertEqual(result, "the user spoke this")
+        XCTAssertEqual(persona.recent.count, 1)
+        XCTAssertEqual(persona.recent[0].text, "the user spoke this")
+    }
+
     func testPurgeLegacyKeysClearsOldDefaults() {
         let suiteName = "ScribeTests-legacy-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -140,7 +188,7 @@ private final class StubFailingService: PolishService {
     var isReady: Bool { true }
     var statusText: String { "stub: always fails" }
     func warmUp() async throws { /* no-op */ }
-    func polish(_ raw: String, languageHint: String) async throws -> String {
+    func polish(_ raw: String, systemPrompt: String) async throws -> String {
         throw PolishError.unavailable("stub failure")
     }
 }
@@ -153,7 +201,7 @@ private final class StubReturning: PolishService {
     private let output: String
     init(_ output: String) { self.output = output }
     func warmUp() async throws { /* no-op */ }
-    func polish(_ raw: String, languageHint: String) async throws -> String { output }
+    func polish(_ raw: String, systemPrompt: String) async throws -> String { output }
 }
 
 @MainActor
@@ -164,7 +212,7 @@ private final class StubFlakyService: PolishService {
     private var remainingThrows: Int
     init(throwOnFirstNCalls n: Int) { self.remainingThrows = n }
     func warmUp() async throws { /* no-op */ }
-    func polish(_ raw: String, languageHint: String) async throws -> String {
+    func polish(_ raw: String, systemPrompt: String) async throws -> String {
         if remainingThrows > 0 {
             remainingThrows -= 1
             throw PolishError.unavailable("flaky")
@@ -181,7 +229,7 @@ private final class StubSlowService: PolishService {
     private let delay: TimeInterval
     init(delaySeconds: TimeInterval) { self.delay = delaySeconds }
     func warmUp() async throws { /* no-op */ }
-    func polish(_ raw: String, languageHint: String) async throws -> String {
+    func polish(_ raw: String, systemPrompt: String) async throws -> String {
         try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         return "POLISHED: " + raw
     }

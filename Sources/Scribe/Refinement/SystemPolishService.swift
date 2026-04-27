@@ -20,7 +20,7 @@ final class SystemPolishService: PolishService {
 
 #if canImport(FoundationModels)
     private var session: Any?  // type-erased LanguageModelSession (gated)
-    private var sessionLanguageHint: String?
+    private var sessionPromptKey: String?  // hash of the system prompt the session was built with
 #endif
 
     init() {
@@ -59,21 +59,27 @@ final class SystemPolishService: PolishService {
             guard SystemLanguageModel.default.availability == .available else {
                 throw PolishError.unavailable(statusText)
             }
-            // Build the session up-front so the first real polish is fast.
-            // Use "auto" — the session may be rebuilt at first polish if the
-            // user's selected language is different.
-            buildSession(languageHint: "auto")
+            // Build a session with a baseline (L1-only) prompt so the first
+            // real polish is fast. The coordinator may pass a richer prompt
+            // including L2/L3 at call time, in which case we rebuild.
+            buildSession(systemPrompt: PolishPrompt.resolvedSystemPrompt(languageHint: "auto"))
             return
 #endif
         }
         throw PolishError.unavailable(L10n.t("polish.system.statusRequiresMacOS26"))
     }
 
-    func polish(_ raw: String, languageHint: String) async throws -> String {
+    func polish(_ raw: String, systemPrompt: String) async throws -> String {
         if #available(macOS 26.0, *) {
 #if canImport(FoundationModels)
-            if sessionLanguageHint != languageHint || !(session is LanguageModelSession) {
-                buildSession(languageHint: languageHint)
+            // Rebuild the session whenever the prompt content changes — Apple FM
+            // bakes instructions into the session at construction. A coarse
+            // identity check (length + first/last chars) avoids hashing the
+            // prompt on every call.
+            let key = "\(systemPrompt.count):\(systemPrompt.prefix(16))…\(systemPrompt.suffix(16))"
+            if sessionPromptKey != key || !(session is LanguageModelSession) {
+                buildSession(systemPrompt: systemPrompt)
+                sessionPromptKey = key
             }
             guard let s = session as? LanguageModelSession else {
                 throw PolishError.unavailable(statusText)
@@ -88,13 +94,10 @@ final class SystemPolishService: PolishService {
 
 #if canImport(FoundationModels)
     @available(macOS 26.0, *)
-    private func buildSession(languageHint: String) {
-        let s = LanguageModelSession(
-            instructions: PolishPrompt.resolvedSystemPrompt(languageHint: languageHint)
-        )
+    private func buildSession(systemPrompt: String) {
+        let s = LanguageModelSession(instructions: systemPrompt)
         s.prewarm()
         self.session = s
-        self.sessionLanguageHint = languageHint
     }
 #endif
 

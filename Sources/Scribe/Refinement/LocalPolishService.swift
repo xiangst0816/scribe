@@ -97,17 +97,14 @@ final class LocalPolishService: PolishService {
         }
     }
 
-    func polish(_ raw: String, languageHint: String) async throws -> String {
+    func polish(_ raw: String, systemPrompt: String) async throws -> String {
         try await warmUp()
         guard let ctx = context else {
             throw PolishError.unavailable(statusText)
         }
-        let prompt = Self.chatMLPrompt(
-            system: PolishPrompt.resolvedSystemPrompt(languageHint: languageHint),
-            user: raw
-        )
-        let raw = try await ctx.generate(prompt: prompt)
-        return Self.cleanQwenOutput(raw)
+        let prompt = Self.chatMLPrompt(system: systemPrompt, user: raw)
+        let result = try await ctx.generate(prompt: prompt)
+        return Self.cleanQwenOutput(result)
     }
 
     // MARK: - Downloader observation

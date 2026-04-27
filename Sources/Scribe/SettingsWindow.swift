@@ -24,12 +24,28 @@ final class SettingsWindow: NSPanel {
     private let systemDetailLabel = NSTextField(labelWithString: "")
     private let localDetailLabel = NSTextField(labelWithString: "")
 
+    // Adaptive (Phase 5.1)
+    private let adaptiveCheckbox = NSButton()
+    private let adaptiveDetailLabel = NSTextField(labelWithString: "")
+    private let personaLabel = NSTextField(labelWithString: "")
+    private let personaTextView = NSTextView()
+    private lazy var personaScrollView: NSScrollView = {
+        let s = NSScrollView()
+        s.hasVerticalScroller = true
+        s.borderType = .lineBorder
+        s.documentView = personaTextView
+        s.translatesAutoresizingMaskIntoConstraints = false
+        return s
+    }()
+    private let openFolderButton = NSButton()
+
     private var observer: NSObjectProtocol?
+    private var personaSaveTimer: Timer?
 
     init(coordinator: PolishCoordinator) {
         self.coordinator = coordinator
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 640),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -150,12 +166,63 @@ final class SettingsWindow: NSPanel {
         localBlock.spacing = 4
         localBlock.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 0)
 
+        // Adaptive section — Phase 5.1
+        adaptiveCheckbox.setButtonType(.switch)
+        adaptiveCheckbox.title = L10n.t("settings.polish.adaptive.label")
+        adaptiveCheckbox.target = self
+        adaptiveCheckbox.action = #selector(adaptiveToggled)
+
+        adaptiveDetailLabel.stringValue = L10n.t("settings.polish.adaptive.detail")
+        adaptiveDetailLabel.font = .systemFont(ofSize: 11)
+        adaptiveDetailLabel.textColor = .secondaryLabelColor
+        adaptiveDetailLabel.lineBreakMode = .byWordWrapping
+        adaptiveDetailLabel.maximumNumberOfLines = 0
+        adaptiveDetailLabel.preferredMaxLayoutWidth = 500
+
+        personaLabel.stringValue = L10n.t("settings.polish.adaptive.persona")
+        personaLabel.font = .systemFont(ofSize: 11)
+        personaLabel.textColor = .secondaryLabelColor
+
+        personaTextView.font = .systemFont(ofSize: 12)
+        personaTextView.isEditable = true
+        personaTextView.isRichText = false
+        personaTextView.isAutomaticQuoteSubstitutionEnabled = false
+        personaTextView.isAutomaticDashSubstitutionEnabled = false
+        personaTextView.delegate = self
+        personaTextView.string = coordinator.personaStore.persona
+        // Show placeholder text via NSTextView's private API workaround:
+        // attribute via the field editor's textContainer doesn't help. Use
+        // a faded label overlaid in the future if desired; for now skip.
+        personaScrollView.heightAnchor.constraint(equalToConstant: 96).isActive = true
+
+        openFolderButton.title = L10n.t("settings.polish.adaptive.openFolder")
+        openFolderButton.bezelStyle = .rounded
+        openFolderButton.target = self
+        openFolderButton.action = #selector(openScribeFolder)
+
+        let adaptiveBlock = NSStackView(views: [
+            adaptiveCheckbox,
+            adaptiveDetailLabel,
+            personaLabel,
+            personaScrollView,
+            openFolderButton,
+        ])
+        adaptiveBlock.orientation = .vertical
+        adaptiveBlock.alignment = .leading
+        adaptiveBlock.spacing = 6
+        adaptiveBlock.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 0)
+
+        let separator = NSBox()
+        separator.boxType = .separator
+
         let main = NSStackView(views: [
             enableCheckbox,
             descriptionLabel,
             engineHeader,
             systemBlock,
             localBlock,
+            separator,
+            adaptiveBlock,
         ])
         main.orientation = .vertical
         main.alignment = .leading
@@ -174,6 +241,12 @@ final class SettingsWindow: NSPanel {
             main.leadingAnchor.constraint(equalTo: cv.leadingAnchor, constant: 20),
             main.trailingAnchor.constraint(equalTo: cv.trailingAnchor, constant: -20),
 
+            // The persona text area should fill horizontally.
+            personaScrollView.leadingAnchor.constraint(equalTo: adaptiveBlock.leadingAnchor),
+            personaScrollView.trailingAnchor.constraint(equalTo: main.trailingAnchor),
+            separator.leadingAnchor.constraint(equalTo: main.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: main.trailingAnchor),
+
             bottomBar.topAnchor.constraint(greaterThanOrEqualTo: main.bottomAnchor, constant: 16),
             bottomBar.bottomAnchor.constraint(equalTo: cv.bottomAnchor, constant: -16),
             bottomBar.trailingAnchor.constraint(equalTo: cv.trailingAnchor, constant: -20),
@@ -184,6 +257,15 @@ final class SettingsWindow: NSPanel {
 
     private func refresh() {
         enableCheckbox.state = coordinator.isEnabled ? .on : .off
+        adaptiveCheckbox.state = coordinator.isAdaptiveEnabled ? .on : .off
+
+        // Persona textbox + Open Folder are only meaningful when adaptive is
+        // on. Disable rather than hide so the layout doesn't jump.
+        let adaptiveOn = coordinator.isAdaptiveEnabled
+        personaTextView.isEditable = adaptiveOn
+        personaTextView.textColor = adaptiveOn ? .labelColor : .disabledControlTextColor
+        openFolderButton.isEnabled = adaptiveOn
+        personaLabel.textColor = adaptiveOn ? .secondaryLabelColor : .tertiaryLabelColor
 
         // Status under each radio — reflects backend.statusText verbatim.
         systemStatusLabel.stringValue = L10n.t("settings.polish.statusPrefix") + coordinator.system.statusText
@@ -284,7 +366,34 @@ final class SettingsWindow: NSPanel {
         coordinator.purgeLocalModel()
     }
 
+    @objc private func adaptiveToggled() {
+        coordinator.isAdaptiveEnabled = (adaptiveCheckbox.state == .on)
+        refresh()
+    }
+
+    @objc private func openScribeFolder() {
+        ModelLocation.ensureModelsDirectoryExists()
+        NSWorkspace.shared.activateFileViewerSelecting([ModelLocation.supportDirectory])
+    }
+
     @objc private func closeWindow() {
         close()
+    }
+}
+
+// MARK: - Persona text-view debounce
+
+extension SettingsWindow: NSTextViewDelegate {
+    /// Persist the persona on every edit, debounced 500 ms so we don't hit the
+    /// disk on every keystroke. Hard cap is enforced by PersonaStore.
+    func textDidChange(_ notification: Notification) {
+        personaSaveTimer?.invalidate()
+        let snapshot = personaTextView.string
+        personaSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                _ = self.coordinator.personaStore.setPersona(snapshot)
+            }
+        }
     }
 }

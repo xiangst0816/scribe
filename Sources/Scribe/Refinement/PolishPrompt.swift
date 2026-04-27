@@ -79,10 +79,50 @@ enum PolishPrompt {
         }
     }
 
-    /// Substitute `{{language_hint}}` into the system prompt. Returns the final
-    /// prompt to feed to the engine.
+    /// Substitute `{{language_hint}}` into the system prompt. Returns just
+    /// the L1 (fixed) prompt — no persona / recent layers. Useful for tests
+    /// and as a backstop when the adaptive feature is off.
     static func resolvedSystemPrompt(languageHint: String) -> String {
         system.replacingOccurrences(of: "{{language_hint}}", with: languageHint)
+    }
+
+    /// Assemble the full system prompt from all available layers. Layers
+    /// follow the L1 / R / L2 / L3 design in [docs/adaptive-polish.md].
+    /// Empty `persona` / `recent` cause the corresponding layers to be
+    /// elided entirely so we don't show "About the user: <empty>" to the
+    /// model.
+    ///
+    /// `runtimeContext` is the placeholder for Phase 5.3's per-app tone;
+    /// pass `nil` (or empty) until then.
+    static func assemble(
+        languageHint: String,
+        runtimeContext: String? = nil,
+        persona: String = "",
+        recent: [PersonaStore.Entry] = []
+    ) -> String {
+        var blocks: [String] = []
+
+        // L1 — fixed core.
+        blocks.append(resolvedSystemPrompt(languageHint: languageHint))
+
+        // R — runtime context (Phase 5.3 placeholder; usually empty).
+        if let runtimeContext, !runtimeContext.isEmpty {
+            blocks.append("Current context: " + runtimeContext)
+        }
+
+        // L2 — who the user is.
+        let trimmedPersona = persona.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPersona.isEmpty {
+            blocks.append("About the user (who they are):\n" + trimmedPersona)
+        }
+
+        // L3 — most recent final outputs as context examples.
+        if !recent.isEmpty {
+            let bulletList = recent.map { "- \"\($0.text)\"" }.joined(separator: "\n")
+            blocks.append("User's recent finished writing (for reference, not to copy):\n" + bulletList)
+        }
+
+        return blocks.joined(separator: "\n\n")
     }
 
     /// Looks like the engine prepended a verbose preface ("Sure, here's the
