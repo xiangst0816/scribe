@@ -97,7 +97,17 @@ final class WhisperSpeechProvider: SpeechProvider {
         }
 
         do {
-            let promptTokens = kit.tokenizer?.encode(text: " " + Self.initialPrompt)
+            // large-v3 trips its no-speech / first-token-logprob filters on
+            // short utterances and returns an empty transcript even when the
+            // smaller models hear the same audio fine. Loosen the gates so
+            // any model produces text and we filter hallucinations downstream.
+            // The custom tech-term prompt also seems to push large-v3 toward
+            // "no speech" — only attach it for the smaller variants where
+            // it actually helps with English jargon recognition.
+            let isLarge = ModelManager.shared.loadedQuality == .high
+            let promptTokens = isLarge
+                ? nil
+                : kit.tokenizer?.encode(text: " " + Self.initialPrompt)
 
             let options = DecodingOptions(
                 verbose: false,
@@ -105,12 +115,16 @@ final class WhisperSpeechProvider: SpeechProvider {
                 language: languageHint,
                 temperature: 0,
                 topK: 5,
-                usePrefillPrompt: true,
+                usePrefillPrompt: !isLarge,
                 detectLanguage: languageHint == nil,
                 skipSpecialTokens: true,
                 withoutTimestamps: true,
                 promptTokens: promptTokens,
-                suppressBlank: true
+                suppressBlank: true,
+                compressionRatioThreshold: nil,
+                logProbThreshold: nil,
+                firstTokenLogProbThreshold: nil,
+                noSpeechThreshold: nil
             )
             let results = try await kit.transcribe(audioArray: samples, decodeOptions: options)
             let raw = results.map { $0.text }.joined(separator: " ")
