@@ -236,6 +236,11 @@ jobs:
           git commit -m "Publish Sparkle appcast for ${TAG}"
           git push origin main
 
+          # Pushes made with GITHUB_TOKEN don't trigger other workflows
+          # (anti-loop safety), so kick Pages off manually so users see the
+          # updated appcast within seconds, not on the next unrelated push.
+          gh workflow run "Deploy to GitHub Pages" --ref main
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
