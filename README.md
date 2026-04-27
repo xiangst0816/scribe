@@ -8,7 +8,7 @@
 
 **Hold a key. Talk. Get text — anywhere on your Mac.**
 
-Local, private, push-to-talk dictation for macOS — powered by [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) running entirely on-device.
+A small, focused push-to-talk dictation utility for macOS. Lives in the menu bar; pastes the recognized text wherever your cursor is.
 
 [![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)](https://www.apple.com/macos/)
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org)
@@ -20,25 +20,23 @@ Local, private, push-to-talk dictation for macOS — powered by [WhisperKit](htt
 
 ## Why Scribe
 
-Scribe lives in your menu bar. Press and hold the **Fn** key, speak, release — and the recognized text is pasted directly into whatever text field has focus, in any app. No network round-trip, no cloud account, no subtitles file you have to copy out of.
+Scribe lives in your menu bar. Press and hold the **Fn** key, speak, release — and the recognized text is pasted directly into whatever text field has focus, in any app. No network round-trip if your Mac supports on-device dictation, no cloud account, no subtitles file you have to copy out of.
 
-Speech recognition runs locally via OpenAI Whisper models compiled to CoreML, so audio never leaves your Mac.
+Scribe uses macOS's built-in speech recognizer (`SFSpeechRecognizer`). On Apple Silicon Macs running Sonoma or later, recognition for major languages typically runs on-device; otherwise audio may transit Apple's servers per Apple's Speech Recognition privacy policy.
 
 ## Features
 
 - **Push-to-talk anywhere** — hold `Fn`, speak, release. Works in Safari, VS Code, Slack, Notes, native text fields, web inputs, even Terminal.
-- **Local Whisper inference** — three quality tiers (Fast / Balanced / High Quality) backed by `openai_whisper-base / small_216MB / large-v3-v20240930_626MB`. Models download once, run offline thereafter.
-- **Apple Speech fallback** — usable instantly while a Whisper model is downloading or loading.
-- **Multilingual** — English, 中文 (简体/繁體), 日本語, 한국어. Whisper detects automatically; the menu lets you lock a language for short utterances.
-- **Live audio level overlay** — a small glassmorphic capsule near the bottom of the screen shows you it's listening.
+- **Live transcript pill** — a frosted glass capsule above the audio waveform shows the current sentence as you speak, so you can see what's being heard before you let go.
+- **Trailing buffer** — recording continues for ~500ms after you release `Fn`, so a sentence you're a beat slow finishing doesn't get cut off. Re-pressing `Fn` during the buffer extends the same recording instead of restarting.
+- **Multilingual** — English, 中文 (简体/繁體), 日本語, 한국어. The menu lets you lock a language or follow the system default.
 - **CJK-friendly paste** — temporarily swaps to an ASCII input source while pasting, so Chinese / Japanese / Korean IMEs don't intercept the `⌘V`.
 - **Menu-bar only** — no Dock icon, no window. `LSUIElement = true`.
-- **~5 MB binary** — Whisper models live next to the app in Application Support; the binary itself is tiny.
 
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
-- Apple Silicon recommended (Whisper runs on the Neural Engine via CoreML)
+- A locale supported by macOS speech recognition (English, 中文, 日本語, 한국어 are all covered out of the box)
 - Xcode Command Line Tools (`xcode-select --install`)
 
 ## Install from source
@@ -62,30 +60,27 @@ make clean          # remove build artifacts
 1. Open `Scribe.app`. It appears in the menu bar with the Scribe icon.
 2. macOS will prompt for **Microphone**, **Speech Recognition**, and **Accessibility** permissions. Grant all three.
    - Accessibility is required to detect the `Fn` key globally and to paste into other apps.
-3. The Balanced model (~210 MB) starts downloading in the background. The menu bar icon shows progress; in the meantime Apple's built-in speech recognizer handles transcription.
-4. Once downloaded, the menu top will read **Balanced · Active**. From now on, everything runs locally.
+3. That's it — there's nothing to download. Hold `Fn`, speak, release.
 
 ## Usage
 
 | Action | Result |
 |---|---|
-| Hold `Fn` | Begin recording. A "Listening…" capsule appears with a live waveform. |
-| Release `Fn` | "Transcribing…" briefly, then the text is pasted at the cursor. |
-| Menu bar → **Voice Quality** | Switch among Fast / Balanced / High Quality. Switching downloads the model on demand. |
-| Menu bar → **Language** | Lock a language for Whisper, or pick System Default for auto-detect. |
+| Hold `Fn` | Begin recording. A waveform capsule appears at the bottom of the screen, with a transcript pill above it showing what you're saying. |
+| Release `Fn` | A 0.5s trailing buffer captures any final words, then the text is pasted at the cursor. |
+| Menu bar → **Language** | Lock a language for recognition, or pick System Default to follow the OS. |
 | Menu bar → **Enabled** | Toggle the global `Fn` listener without quitting. |
 
 ### Keyboard shortcut
 
-The hotkey is currently hard-coded to **Fn**. Change `KeyMonitor.swift` if you want a different modifier — patches welcome.
+The hotkey is currently hard-coded to **Fn**. Change [KeyMonitor.swift](Sources/Scribe/KeyMonitor.swift) if you want a different modifier — patches welcome.
 
 ### Files on disk
 
 | Path | Purpose |
 |---|---|
-| `~/Library/Application Support/Scribe/Models/<variant>/` | Downloaded CoreML model bundles |
 | `~/Library/Logs/Scribe.log` | Application log |
-| `~/Library/Preferences/com.yetone.Scribe.plist` | UserDefaults (selected language, selected quality) |
+| `~/Library/Preferences/com.yetone.Scribe.plist` | UserDefaults (selected language) |
 
 ## Repository layout
 
@@ -94,7 +89,10 @@ This is a monorepo containing the Mac app and the marketing website.
 ```
 scribe/
 ├── Package.swift, Makefile, Info.plist, AppIcon.icns
-├── Sources/Scribe/                ← Swift app source
+├── Sources/
+│   ├── Scribe/                    ← ScribeCore library — all the app logic
+│   └── ScribeApp/main.swift       ← thin executable, just runs NSApplication
+├── Tests/ScribeCoreTests/         ← XCTest unit tests
 ├── web/                           ← Astro marketing site (deployed to Cloudflare Pages)
 └── .github/workflows/
     └── deploy-web.yml             ← path-triggered web deploy
@@ -106,28 +104,26 @@ The Mac app and the site share **no build dependencies** — they're independent
 
 ```
 Scribe.app
-├── KeyMonitor          ── CGEventTap on .flagsChanged, watches the Fn flag
-├── SpeechProvider      ── protocol — start/stop/cancel + onAudioLevel/onFinalResult
-│   ├── AppleSpeechProvider    ── SFSpeechRecognizer streaming, used as fallback
-│   └── WhisperSpeechProvider  ── WhisperKit + AudioProcessor, push-to-talk transcription
-├── ModelManager        ── tier mapping, HF download with progress, CoreML load/prewarm
-├── OverlayPanel        ── borderless NSPanel + waveform animation
-├── TextInjector        ── clipboard-and-⌘V paste, with IME swap dance
-└── AppDelegate         ── menu bar UI, status icon, provider selection
+├── KeyMonitor             ── CGEventTap on .flagsChanged, watches the Fn flag
+├── SpeechProvider         ── protocol — start/stop/cancel + onAudioLevel/onPartialResult/onFinalResult
+│   └── AppleSpeechProvider    ── SFSpeechRecognizer streaming, with audio-level metering
+├── OverlayPanel           ── borderless NSPanel with frosted-glass capsule + live transcript pill
+├── TextInjector           ── clipboard-and-⌘V paste, with IME swap dance
+└── AppDelegate            ── menu bar UI, status icon, recording lifecycle
 ```
 
-The whole app is around 1,500 lines of Swift. There's no Xcode project — only [Package.swift](Package.swift) plus a small [Makefile](Makefile) that wraps `swift build` with the `.app` bundling and ad-hoc codesign.
+The whole app is a few hundred lines of Swift split across the `ScribeCore` library and a thin executable. There's no Xcode project — only [Package.swift](Package.swift) plus a small [Makefile](Makefile) that wraps `swift build` with the `.app` bundling and ad-hoc codesign. Run the test suite with `swift test`.
 
 ## Privacy
 
-- **No network requests** are made for speech recognition once a model is downloaded.
-- The only outbound network calls are: (a) HuggingFace, when downloading a model variant the first time you select it, and (b) optionally the OpenAI-compatible LLM endpoint, if you re-enable the legacy LLM-refinement code path (disabled by default and absent from the menu).
-- Audio is buffered in memory only for the duration of a single push-to-talk hold, then discarded.
+- Speech recognition is handled by Apple's `SFSpeechRecognizer`. On Apple Silicon Macs running Sonoma or later, recognition for the four supported languages typically runs on-device; under other conditions, audio may be transmitted to Apple's servers under Apple's [Speech Recognition](https://www.apple.com/legal/privacy/data/en/speech-recognition/) privacy policy.
+- Scribe itself makes no other outbound network requests. The only exception is an optional, off-by-default LLM refinement path that calls an OpenAI-compatible endpoint if you re-enable it manually; it does not appear in the menu.
+- Audio is buffered in memory only for the duration of a single push-to-talk hold (plus the 500ms trailing buffer), then discarded.
 
 ## Acknowledgements
 
-- [argmaxinc/argmax-oss-swift](https://github.com/argmaxinc/argmax-oss-swift) — WhisperKit, the Swift+CoreML port of OpenAI Whisper.
-- [OpenAI Whisper](https://github.com/openai/whisper) — the speech recognition models.
+- [Sparkle](https://sparkle-project.org) — auto-update framework.
+- Apple's [Speech](https://developer.apple.com/documentation/speech) framework — the underlying recognizer.
 
 ## License
 
