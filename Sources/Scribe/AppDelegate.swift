@@ -2,6 +2,7 @@ import AppKit
 import Speech
 import Sparkle
 
+@MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
 
@@ -14,6 +15,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private let textInjector = TextInjector()
     private lazy var overlayPanel = OverlayPanel()
+    private let polishCoordinator = PolishCoordinator.shared
+    private var settingsWindow: SettingsWindow?
+    private var polishStatusMenuItem: NSMenuItem!
+    private var settingsMenuItem: NSMenuItem!
+    private var lastPolishWasSkipped = false
 
     /// Single source of truth for the recording lifecycle. All transitions go
     /// through `fnDown`, `fnUp`, or `handleTermination` — no flag juggling.
@@ -52,6 +58,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         L10n.setLanguage(localeCode: selectedLocaleCode)
 
+        // Drop the deprecated remote-LLM keys before the new polish UI reads
+        // anything. Safe even when no old keys are present.
+        PolishCoordinator.purgeLegacyKeys()
+
+        polishCoordinator.refreshAvailability()
+        polishCoordinator.prewarmIfNeeded()
+        polishCoordinator.onBreakerTripped = { [weak self] message in
+            self?.showAlert(
+                title: L10n.t("alert.polishBreakerTitle"),
+                message: L10n.t("alert.polishBreakerBody") + "\n\n\(message)"
+            )
+            self?.refreshPolishMenuItem()
+        }
+        NotificationCenter.default.addObserver(
+            forName: .polishAvailabilityChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Posted on .main, but the closure is Sendable so we hop through
+            // assumeIsolated to access main-actor state synchronously.
+            MainActor.assumeIsolated {
+                self?.refreshPolishMenuItem()
+            }
+        }
+
         setupStatusBar()
 
         AppleSpeechSession.requestPermissions { [weak self] granted, errorMsg in
@@ -69,13 +100,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Re-attempt event tap when the app regains focus, so the user can grant
         // Accessibility in System Settings without having to relaunch.
+        // Also re-query Apple Intelligence availability — toggling it in
+        // System Settings should reflect without a Scribe relaunch.
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self, self.isEnabled else { return }
-            _ = self.keyMonitor.start()
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.isEnabled { _ = self.keyMonitor.start() }
+                self.polishCoordinator.refreshAvailability()
+            }
         }
     }
 
@@ -147,9 +183,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayPanel.dismiss()
         guard !trimmed.isEmpty else { return }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.textInjector.inject(trimmed)
-            NSSound(named: .init("Pop"))?.play()
+        // Polish via the coordinator; on any failure or master-toggle-off this
+        // returns the input unchanged. The 0.1s nudge before injection lets
+        // the previous `cancel()` settle so cmd-V isn't intercepted mid-state.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let beforeFailures = self.polishCoordinator.consecutiveFailures
+            let polished = await self.polishCoordinator.maybePolish(
+                trimmed,
+                selectedLocaleCode: self.selectedLocaleCode
+            )
+            self.lastPolishWasSkipped = (self.polishCoordinator.consecutiveFailures > beforeFailures)
+            self.refreshPolishMenuItem()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.textInjector.inject(polished)
+                NSSound(named: .init("Pop"))?.play()
+            }
         }
     }
 
@@ -208,6 +257,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        // Polish status (read-only; clicking opens the Settings window).
+        polishStatusMenuItem = NSMenuItem(title: "", action: #selector(openSettings), keyEquivalent: "")
+        polishStatusMenuItem.target = self
+        menu.addItem(polishStatusMenuItem)
+
+        settingsMenuItem = NSMenuItem(title: L10n.t("menu.settings"), action: #selector(openSettings), keyEquivalent: ",")
+        settingsMenuItem.target = self
+        menu.addItem(settingsMenuItem)
+
+        refreshPolishMenuItem()
+
+        menu.addItem(.separator())
+
         // Manual update check — Sparkle also runs an automatic background check
         // once a day per Info.plist (SUScheduledCheckInterval / SUEnableAutomaticChecks).
         let updateItem = NSMenuItem(
@@ -238,6 +300,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         langMenuItem?.title = L10n.t("menu.language")
         quitMenuItem?.title = L10n.t("menu.quit")
         systemDefaultLangItem?.title = L10n.t("menu.systemDefault")
+        settingsMenuItem?.title = L10n.t("menu.settings")
+        refreshPolishMenuItem()
+    }
+
+    /// Update the "Polish: <state>" menu item based on coordinator state.
+    private func refreshPolishMenuItem() {
+        guard let item = polishStatusMenuItem else { return }
+        let key: String
+        if polishCoordinator.isBreakerTripped {
+            key = "menu.polish.breakerTripped"
+        } else if !polishCoordinator.isEnabled {
+            key = "menu.polish.off"
+        } else if let svc = polishCoordinator.active() {
+            key = svc.backend == .system ? "menu.polish.readySystem" : "menu.polish.readyLocal"
+        } else if lastPolishWasSkipped {
+            key = "menu.polish.skipped"
+        } else {
+            key = "menu.polish.unavailable"
+        }
+        item.title = L10n.t(key)
     }
 
     private func updateStatusIcon() {
@@ -302,6 +384,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() {
         keyMonitor.stop()
         NSApp.terminate(nil)
+    }
+
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindow(coordinator: polishCoordinator)
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Alerts

@@ -1,0 +1,264 @@
+import Foundation
+
+/// Single entry-point for the polishing feature. Owns the two backend services
+/// (System / Local), arbitrates which one is active based on user preference
+/// in Settings, enforces the 3-second hard timeout, and trips a circuit
+/// breaker after 3 consecutive failures.
+///
+/// The arbitration is **explicit** — `selectedBackend` decides which service
+/// gets called. There is no automatic fallback from one backend to the other:
+/// the Settings UI is what users use to pick.
+@MainActor
+final class PolishCoordinator {
+    @MainActor static let shared = PolishCoordinator()
+
+    /// Protocol-typed so tests can swap in stubs. In production these point at
+    /// the concrete `SystemPolishService` / `LocalPolishService`.
+    var system: PolishService
+    var local: PolishService
+
+    private let defaults: UserDefaults
+
+    /// Hard timeout per polish call. Anything slower than this gets cancelled
+    /// and the raw transcript is pasted instead — better to lose polish than
+    /// to lose the recording.
+    static let timeoutSeconds: TimeInterval = 3.0
+
+    /// After this many consecutive failures, master toggle auto-disables and
+    /// the user is notified. Prevents a broken model from quietly eating every
+    /// recording.
+    static let breakerThreshold = 3
+
+    // MARK: - Persistence
+
+    private static let kEnabled  = "polish.enabled"
+    private static let kBackend  = "polish.backend"
+    private static let kMirror   = "polish.local.mirror"
+
+    /// Mirror preference for the Local backend's download. Default is `.auto`,
+    /// which the downloader resolves against the user's current dictation locale.
+    var mirrorPreference: ModelMirrorPreference {
+        get {
+            let raw = defaults.string(forKey: Self.kMirror) ?? ""
+            return ModelMirrorPreference(rawValue: raw) ?? .auto
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Self.kMirror)
+            NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
+        }
+    }
+
+    var isEnabled: Bool {
+        get { defaults.bool(forKey: Self.kEnabled) }
+        set {
+            defaults.set(newValue, forKey: Self.kEnabled)
+            if newValue {
+                resetCircuitBreaker()
+                prewarmIfNeeded()
+            }
+            NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
+        }
+    }
+
+    var selectedBackend: PolishBackend {
+        get {
+            let raw = defaults.string(forKey: Self.kBackend) ?? ""
+            return PolishBackend(rawValue: raw) ?? defaultBackend()
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Self.kBackend)
+            resetCircuitBreaker()
+            prewarmIfNeeded()
+            NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
+        }
+    }
+
+    // MARK: - Circuit breaker state
+
+    private(set) var consecutiveFailures: Int = 0
+    private(set) var lastFailureMessage: String?
+
+    /// Set when the breaker has tripped, until the user re-enables polish.
+    private(set) var isBreakerTripped: Bool = false
+
+    /// Fired when consecutive failures hit `breakerThreshold` — UI / status bar
+    /// should react (notify the user, flip the master toggle off).
+    var onBreakerTripped: ((String) -> Void)?
+
+    // MARK: - Init
+
+    init(
+        system: PolishService? = nil,
+        local: PolishService? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        self.system = system ?? SystemPolishService()
+        self.local  = local  ?? LocalPolishService()
+        self.defaults = defaults
+    }
+
+    /// Test-only convenience to keep the call sites in tests readable.
+    convenience init(testDefaults: UserDefaults) {
+        self.init(defaults: testDefaults)
+    }
+
+    /// Test-only setter so tests can replace one of the backends after
+    /// construction. Production code never calls this — use init injection.
+    func injectStubService(_ service: PolishService, as backend: PolishBackend) {
+        switch backend {
+        case .system: self.system = service
+        case .local:  self.local  = service
+        }
+    }
+
+    /// Convenience for early-startup wiring. Asks each service to refresh its
+    /// read of the environment (e.g. macOS toggling Apple Intelligence in
+    /// System Settings), so Settings reflects current truth without a relaunch.
+    func refreshAvailability() {
+        system.refreshAvailability()
+        local.refreshAvailability()
+    }
+
+    /// Fire-and-forget warm-up of the active backend so the user's first polish
+    /// call doesn't have to absorb model-load latency under the 3 s timeout.
+    /// Idempotent — `warmUp()` is a no-op once the backend is loaded.
+    func prewarmIfNeeded() {
+        guard let svc = active() else { return }
+        Task { @MainActor in
+            try? await svc.warmUp()
+        }
+    }
+
+    /// Convenience for the Settings UI: kick off the Local backend's download
+    /// using the current mirror preference + dictation locale (the locale tells
+    /// the downloader which mirror to try first when preference is `.auto`).
+    func startLocalDownload() {
+        let locale = defaults.string(forKey: "selectedLocaleCode") ?? ""
+        local.startDownload(mirrorPreference: mirrorPreference, localeCode: locale)
+    }
+
+    func cancelLocalDownload() {
+        local.cancelDownload()
+    }
+
+    func purgeLocalModel() {
+        local.purgeModel()
+    }
+
+    /// Default backend pick at first launch: System if it can possibly run on
+    /// this machine, otherwise Local.
+    private func defaultBackend() -> PolishBackend {
+        system.isReady ? .system : .local
+    }
+
+    // MARK: - Routing
+
+    /// The service that *would* run if `polish` were called right now.
+    /// `nil` means "no polish — paste raw" for any reason: master toggle off,
+    /// breaker tripped, selected backend not ready.
+    func active() -> PolishService? {
+        guard isEnabled, !isBreakerTripped else { return nil }
+        switch selectedBackend {
+        case .system: return system.isReady ? system : nil
+        case .local:  return local.isReady ? local : nil
+        }
+    }
+
+    // MARK: - Inference
+
+    /// Try to polish `raw`. On any failure (timeout, throw, empty output,
+    /// length explosion, breaker tripped, no active backend) returns `raw`
+    /// unchanged so the caller can paste *something*. The caller doesn't need
+    /// any error handling.
+    func maybePolish(_ raw: String, selectedLocaleCode: String) async -> String {
+        guard let svc = active() else { return raw }
+
+        let hint = PolishPrompt.languageHint(for: selectedLocaleCode)
+        do {
+            let polished = try await withTimeout(seconds: Self.timeoutSeconds) {
+                try await svc.polish(raw, languageHint: hint)
+            }
+            try validate(polished, against: raw)
+            recordSuccess()
+            return polished
+        } catch {
+            recordFailure(error.localizedDescription)
+            return raw
+        }
+    }
+
+    /// Reject empty / nonsense / runaway outputs — fall back to raw. Length
+    /// budget is `2× input` per design doc §3.4.
+    private func validate(_ polished: String, against raw: String) throws {
+        let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { throw PolishError.emptyOutput }
+        if trimmed.count > max(64, raw.count * 2) {
+            throw PolishError.lengthExploded
+        }
+    }
+
+    // MARK: - Circuit breaker
+
+    private func recordSuccess() {
+        consecutiveFailures = 0
+        lastFailureMessage = nil
+    }
+
+    private func recordFailure(_ message: String) {
+        consecutiveFailures += 1
+        lastFailureMessage = message
+        NSLog("Scribe polish failure (%d/%d): %@",
+              consecutiveFailures, Self.breakerThreshold, message)
+        if consecutiveFailures >= Self.breakerThreshold {
+            tripBreaker(message)
+        }
+        NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
+    }
+
+    private func tripBreaker(_ message: String) {
+        isBreakerTripped = true
+        isEnabled = false  // master switch off; user must explicitly re-enable
+        onBreakerTripped?(message)
+    }
+
+    func resetCircuitBreaker() {
+        consecutiveFailures = 0
+        lastFailureMessage = nil
+        isBreakerTripped = false
+    }
+
+    // MARK: - Old-key cleanup
+
+    /// Removes UserDefaults keys from the deprecated remote-LLM path. Safe to
+    /// call on every launch — `removeObject(forKey:)` is a no-op if missing.
+    static func purgeLegacyKeys(in defaults: UserDefaults = .standard) {
+        let oldKeys = ["llmEnabled", "llmAPIBaseURL", "llmAPIKey", "llmModel"]
+        for k in oldKeys { defaults.removeObject(forKey: k) }
+    }
+}
+
+// MARK: - Timeout helper
+
+/// Race the work against a sleep; whichever finishes first wins, the other
+/// gets cancelled. `Task.sleep` cancellation propagates immediately, so the
+/// loser doesn't hang around.
+@MainActor
+func withTimeout<T: Sendable>(
+    seconds: TimeInterval,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw PolishError.timeout
+        }
+        defer { group.cancelAll() }
+        guard let first = try await group.next() else {
+            throw PolishError.timeout
+        }
+        return first
+    }
+}

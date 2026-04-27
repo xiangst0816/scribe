@@ -8,12 +8,22 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.4"),
     ],
     targets: [
+        // llama.cpp consumed as a binary xcframework. The arm64 macOS slice is
+        // ~9 MB linked into the .app; SwiftPM strips dSYMs at integration time.
+        // Pinned to a specific release so Sparkle delta updates and CI builds
+        // are reproducible.
+        .binaryTarget(
+            name: "llama",
+            url: "https://github.com/ggml-org/llama.cpp/releases/download/b8943/llama-b8943-xcframework.zip",
+            checksum: "96ad022efc1973aba8c0ee1d5e0666db3c3692374895f1c7b27bfe4275b55f63"
+        ),
         // Library holding all of the app's logic so tests can `@testable import`
         // it without `main.swift` trying to run NSApplication on the test bundle.
         .target(
             name: "ScribeCore",
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
+                "llama",
             ],
             path: "Sources/Scribe"
         ),
@@ -22,8 +32,9 @@ let package = Package(
             dependencies: ["ScribeCore"],
             path: "Sources/ScribeApp",
             linkerSettings: [
-                // Without this, Sparkle.framework is invisible to dyld at runtime
-                // because SwiftPM's default rpath only points beside the binary.
+                // Without this, Sparkle.framework / llama.framework are invisible
+                // to dyld at runtime because SwiftPM's default rpath only points
+                // beside the binary.
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks"]),
             ]
         ),

@@ -31,6 +31,7 @@ Scribe uses macOS's built-in speech recognizer (`SFSpeechRecognizer`). On Apple 
 - **Trailing buffer** — recording continues for ~500ms after you release `Fn`, so a sentence you're a beat slow finishing doesn't get cut off. Re-pressing `Fn` during the buffer extends the same recording instead of restarting.
 - **Multilingual** — English, 中文 (简体/繁體), 日本語, 한국어. The menu lets you lock a language or follow the system default.
 - **CJK-friendly paste** — temporarily swaps to an ASCII input source while pasting, so Chinese / Japanese / Korean IMEs don't intercept the `⌘V`.
+- **Optional on-device polishing** — an advanced setting can clean up filler words and disfluencies via either Apple Intelligence (macOS 26+, supported regions) or a downloaded local model (Qwen2.5-1.5B, ~1 GB). Off by default. Polishing always runs locally — no transcript ever leaves your Mac.
 - **Menu-bar only** — no Dock icon, no window. `LSUIElement = true`.
 
 ## Requirements
@@ -105,25 +106,36 @@ The Mac app and the site share **no build dependencies** — they're independent
 ```
 Scribe.app
 ├── KeyMonitor             ── CGEventTap on .flagsChanged, watches the Fn flag
-├── SpeechProvider         ── protocol — start/stop/cancel + onAudioLevel/onPartialResult/onFinalResult
-│   └── AppleSpeechProvider    ── SFSpeechRecognizer streaming, with audio-level metering
+├── AppleSpeechSession     ── SFSpeechRecognizer streaming, with audio-level metering
 ├── OverlayPanel           ── borderless NSPanel with frosted-glass capsule + live transcript pill
 ├── TextInjector           ── clipboard-and-⌘V paste, with IME swap dance
+├── Refinement/            ── optional transcript polishing (off by default)
+│   ├── PolishCoordinator      ── arbitration, 3 s timeout, circuit breaker
+│   ├── SystemPolishService    ── Apple Intelligence (macOS 26+, supported regions)
+│   └── LocalPolishService     ── Qwen2.5-1.5B GGUF via llama.cpp + downloader
+├── SettingsWindow         ── master toggle + System/Local backend pickers
 └── AppDelegate            ── menu bar UI, status icon, recording lifecycle
 ```
 
-The whole app is a few hundred lines of Swift split across the `ScribeCore` library and a thin executable. There's no Xcode project — only [Package.swift](Package.swift) plus a small [Makefile](Makefile) that wraps `swift build` with the `.app` bundling and ad-hoc codesign. Run the test suite with `swift test`.
+The Mac app is split across the `ScribeCore` library and a thin executable. There's no Xcode project — only [Package.swift](Package.swift) plus a small [Makefile](Makefile) that wraps `swift build` with the `.app` bundling and ad-hoc codesign. Run the test suite with `swift test` (XCTest, requires Xcode for local runs; CI uses the `macos-15` runner).
+
+llama.cpp ships as a binary `xcframework` consumed via SwiftPM `binaryTarget` — no CMake or Xcode required for Scribe builds. The arm64 framework is ~9 MB linked into the .app; the model weights live separately under `~/Library/Application Support/Scribe/`.
 
 ## Privacy
 
-- Speech recognition is handled by Apple's `SFSpeechRecognizer`. On Apple Silicon Macs running Sonoma or later, recognition for the four supported languages typically runs on-device; under other conditions, audio may be transmitted to Apple's servers under Apple's [Speech Recognition](https://www.apple.com/legal/privacy/data/en/speech-recognition/) privacy policy.
-- Scribe itself makes no other outbound network requests. The only exception is an optional, off-by-default LLM refinement path that calls an OpenAI-compatible endpoint if you re-enable it manually; it does not appear in the menu.
-- Audio is buffered in memory only for the duration of a single push-to-talk hold (plus the 500ms trailing buffer), then discarded.
+- **Speech recognition** is handled by Apple's `SFSpeechRecognizer`. On Apple Silicon Macs running Sonoma or later, recognition for the four supported languages typically runs on-device; under other conditions, audio may be transmitted to Apple's servers under Apple's [Speech Recognition](https://www.apple.com/legal/privacy/data/en/speech-recognition/) privacy policy.
+- **Optional polishing** has two engines, both fully local at inference time:
+  - *System* — Apple Intelligence's on-device language model. No download. Available on macOS 26+ in supported regions.
+  - *Scribe local model* — Qwen2.5-1.5B-Instruct (~1 GB). Downloaded once on first enable from HuggingFace or ModelScope; the URL and SHA-256 are baked into the binary. After download, all polishing runs entirely locally — no network traffic.
+- Polishing is **off by default**. When enabled, the raw transcript is fed to the chosen on-device engine before pasting; on any timeout or error, Scribe falls back to the raw transcript so you don't lose the recording.
+- Audio is buffered in memory only for the duration of a single push-to-talk hold (plus the 500 ms trailing buffer), then discarded.
 
 ## Acknowledgements
 
 - [Sparkle](https://sparkle-project.org) — auto-update framework.
 - Apple's [Speech](https://developer.apple.com/documentation/speech) framework — the underlying recognizer.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) — local-model inference engine (MIT).
+- [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) by Alibaba — local-polishing model (Apache 2.0).
 
 ## License
 

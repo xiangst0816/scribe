@@ -37,12 +37,14 @@ build:
 	cp Info.plist $(APP_BUNDLE)/Contents/
 	cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/
 	@for b in $(BUILD_DIR)/*.bundle; do \
-		[ -e "$$b" ] && cp -R "$$b" $(APP_BUNDLE)/Contents/Resources/ ; \
+		[ -e "$$b" ] && cp -R "$$b" $(APP_BUNDLE)/Contents/Resources/ || true ; \
 	done
-	@if [ -d "$(BUILD_DIR)/Sparkle.framework" ]; then \
-		cp -R "$(BUILD_DIR)/Sparkle.framework" $(APP_BUNDLE)/Contents/Frameworks/ ; \
-		echo "📦 Embedded Sparkle.framework" ; \
-	fi
+	@for fw in $(BUILD_DIR)/*.framework; do \
+		[ -d "$$fw" ] || continue; \
+		name=$$(basename "$$fw"); \
+		cp -R "$$fw" $(APP_BUNDLE)/Contents/Frameworks/ ; \
+		echo "📦 Embedded $$name" ; \
+	done
 	@if [ -n "$(VERSION)" ]; then \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" $(APP_BUNDLE)/Contents/Info.plist ; \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(VERSION)" $(APP_BUNDLE)/Contents/Info.plist ; \
@@ -58,6 +60,15 @@ build:
 		codesign $(CODESIGN_INNER_FLAGS) "$$SF" ; \
 		echo "🔏 Signed Sparkle.framework" ; \
 	fi
+	@# Sign every other embedded framework (e.g. llama.framework). Sparkle is
+	@# already handled above; idempotent re-signs would still work but the
+	@# Sparkle block has its own subcomponent traversal so leave it alone.
+	@for fw in $(APP_BUNDLE)/Contents/Frameworks/*.framework; do \
+		[ -d "$$fw" ] || continue; \
+		case "$$fw" in *Sparkle.framework) continue ;; esac; \
+		codesign $(CODESIGN_INNER_FLAGS) "$$fw" ; \
+		echo "🔏 Signed $$(basename $$fw)" ; \
+	done
 	codesign $(CODESIGN_FLAGS) $(APP_BUNDLE)
 	@echo "\n✅ Built $(APP_BUNDLE)"
 
