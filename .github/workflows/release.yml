@@ -164,29 +164,35 @@ jobs:
 
           # `notarytool submit --wait` returns once the notary *database* has
           # the verdict, but `stapler staple` reads from the *CloudKit* edge
-          # cache, which is updated asynchronously. The replication lag is
-          # usually < 30 s but can stretch to a few minutes — when stapler
-          # races ahead of replication you get:
+          # cache, which is updated asynchronously. Replication is normally
+          # < 30 s but has been observed to stretch past 5 min on the GH
+          # macos-15 runner. When stapler races ahead of replication:
           #   CloudKit query for X failed due to "Record not found".
           #   The staple and validate action failed! Error 65.
-          # Apple's recommended workaround is to retry. 5 tries × 30 s linear
-          # backoff → worst case ~2.5 min wait, beyond what we've seen in
-          # practice.
+          #
+          # Strategy: budget 15 min of wall-clock retries with 60 s gaps. If
+          # CloudKit *still* hasn't replicated after 15 min, ship the bundle
+          # un-stapled rather than failing the release — `notarytool` already
+          # returned Accepted, so Apple's database has the verdict and online
+          # Gatekeeper will pass. Only offline first-launch users see a brief
+          # delay until their Mac connects to verify. The .app remains a
+          # valid, fully-notarized binary either way.
           staple_with_retry() {
             local target="$1"
+            local deadline=$(($(date +%s) + 900))   # 15 min wall clock
             local attempt=1
-            local max=5
-            while [ "$attempt" -le "$max" ]; do
+            while true; do
               if xcrun stapler staple "$target"; then
+                echo "✓ stapled $(basename $target) on attempt $attempt" >&2
                 return 0
               fi
-              if [ "$attempt" -eq "$max" ]; then
-                echo "stapler failed after $max attempts — giving up." >&2
+              local now=$(date +%s)
+              if [ "$now" -ge "$deadline" ]; then
+                echo "::warning::stapler still failing on $(basename $target) after 15 min — Apple's CloudKit edge cache is replicating slowly. Shipping un-stapled. The bundle is fully notarized in Apple's notary database; online Gatekeeper will pass. Offline first-launch users may see a brief verification delay." >&2
                 return 1
               fi
-              local delay=$((attempt * 30))
-              echo "stapler attempt $attempt/$max failed (likely CloudKit replication lag). Retrying in ${delay}s…" >&2
-              sleep "$delay"
+              echo "stapler attempt $attempt on $(basename $target) failed (CloudKit lag; $((deadline - now))s budget left). Retrying in 60s…" >&2
+              sleep 60
               attempt=$((attempt + 1))
             done
           }
@@ -195,19 +201,22 @@ jobs:
           submit Scribe.zip
 
           echo "→ Stapling ticket to Scribe.app…"
-          staple_with_retry Scribe.app
-          xcrun stapler validate Scribe.app
-          spctl --assess --type execute --verbose=2 Scribe.app
-
-          echo "→ Re-zipping stapled bundle…"
-          rm -f Scribe.zip
-          ditto -c -k --keepParent Scribe.app Scribe.zip
+          if staple_with_retry Scribe.app; then
+            xcrun stapler validate Scribe.app
+            spctl --assess --type execute --verbose=2 Scribe.app
+            echo "→ Re-zipping stapled bundle…"
+            rm -f Scribe.zip
+            ditto -c -k --keepParent Scribe.app Scribe.zip
+          else
+            echo "→ Skipping re-zip; original notarized Scribe.zip already on disk."
+          fi
 
           echo "→ Notarizing Scribe.dmg…"
           submit Scribe.dmg
-          staple_with_retry Scribe.dmg
-          xcrun stapler validate Scribe.dmg
-          spctl --assess --type open --context context:primary-signature --verbose=2 Scribe.dmg
+          if staple_with_retry Scribe.dmg; then
+            xcrun stapler validate Scribe.dmg
+            spctl --assess --type open --context context:primary-signature --verbose=2 Scribe.dmg
+          fi
 
       - name: Clean up keychain
         if: always() && steps.keychain.outputs.keychain != ''
