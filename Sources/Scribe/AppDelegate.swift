@@ -21,6 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTranscribing = false
     private var currentDownloadProgress: Double?
 
+    /// Trailing audio captured after FN release. Users often let go a beat
+    /// before they finish their sentence; this preserves those last words.
+    private static let trailingBufferSeconds: TimeInterval = 1.0
+    private var pendingStop: DispatchWorkItem?
+
     private var enableMenuItem: NSMenuItem!
     private var statusInfoItem: NSMenuItem!
     private var langMenuItem: NSMenuItem!
@@ -88,6 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Key events
 
     private func fnDown() {
+        // Re-pressing FN while a trailing-buffer stop is pending means the user
+        // wasn't done — cancel the pending stop and keep the same recording.
+        if let pending = pendingStop {
+            pending.cancel()
+            pendingStop = nil
+            return
+        }
+
         guard isEnabled, !isRecording, !isTranscribing else { return }
 
         // Choose Whisper if ready, else fall back to Apple Speech.
@@ -103,14 +116,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func fnUp() {
-        guard isRecording else { return }
-        isRecording = false
-        isTranscribing = true
+        guard isRecording, pendingStop == nil else { return }
 
-        updateStatusIcon()
-        overlayPanel.showLoading()
-
-        activeProvider?.stop()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingStop = nil
+            self.isRecording = false
+            self.isTranscribing = true
+            self.updateStatusIcon()
+            self.overlayPanel.showLoading()
+            self.activeProvider?.stop()
+        }
+        pendingStop = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.trailingBufferSeconds, execute: work)
     }
 
     // MARK: - Provider callbacks
@@ -338,44 +356,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         button.title = ""
 
-        if isRecording {
-            // Keep the mascot logo while recording — the macOS orange mic
-            // privacy indicator already signals that the mic is hot.
-            button.image = Self.idleLogoImage
-        } else if isTranscribing {
-            let img = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Transcribing")
-            img?.isTemplate = true
-            button.image = img
+        let symbolName: String
+        let description: String
+        if isTranscribing {
+            symbolName = "waveform"
+            description = "Transcribing"
         } else {
-            button.image = Self.idleLogoImage
+            symbolName = "mic.fill"
+            description = "Voice Input"
         }
+        let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)
+        img?.isTemplate = true
+        button.image = img
     }
-
-    /// Mickey-style silhouette of the Scribe mascot — head (r=7) plus two
-    /// round ears (r=4) sitting symmetrically on top. Drawn as a single merged
-    /// path traversing the outer outline of the three-circle union.
-    /// Intersection points are precomputed analytically so the elliptical arc
-    /// commands stitch cleanly. No mask/clip — works with the limited SVG
-    /// support in NSImage's renderer.
-    private static let idleLogoImage: NSImage = {
-        let svg = """
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
-          <path fill="none" stroke="black" stroke-width="1.6"
-                stroke-linejoin="round" stroke-linecap="round"
-                d="M 4.94 9.498
-                   A 4 4 0 1 1 8.915 6.318
-                   A 7 7 0 0 1 13.085 6.318
-                   A 4 4 0 1 1 17.06 9.498
-                   A 7 7 0 1 1 4.94 9.498 Z"/>
-        </svg>
-        """
-        let data = svg.data(using: .utf8)!
-        let img = NSImage(data: data) ?? NSImage()
-        img.size = NSSize(width: 18, height: 18)
-        img.isTemplate = true
-        img.accessibilityDescription = "Voice Input"
-        return img
-    }()
 
     // MARK: - Actions
 
@@ -389,6 +382,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             keyMonitor.stop()
+            pendingStop?.cancel()
+            pendingStop = nil
             if isRecording {
                 activeProvider?.cancel()
                 overlayPanel.dismiss()
