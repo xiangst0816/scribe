@@ -112,3 +112,39 @@ final class VoiceQualityTests: XCTestCase {
         XCTAssertEqual(VoiceQuality.allCases.first, .system)
     }
 }
+
+final class FormatQualityRowTests: XCTestCase {
+
+    // Regression: when the user has a Whisper tier selected, the always-ready
+    // .system row used to also render as "In Use", showing two checkmark-style
+    // labels at once. Non-selected ready rows must say "Ready" instead.
+    func testReadySystemShowsReadyWhenNotSelected() {
+        let row = AppDelegate.formatQualityRow(.system, state: .ready, isSelected: false)
+        XCTAssertTrue(row.contains(L10n.t("quality.suffix.ready")))
+        XCTAssertFalse(row.contains(L10n.t("quality.suffix.inUse")))
+    }
+
+    func testReadySystemShowsInUseWhenSelected() {
+        let row = AppDelegate.formatQualityRow(.system, state: .ready, isSelected: true)
+        XCTAssertTrue(row.contains(L10n.t("quality.suffix.inUse")))
+    }
+
+    // Same rule must hold for any Whisper tier left at .ready after a switch.
+    func testReadyWhisperShowsReadyWhenNotSelected() {
+        let row = AppDelegate.formatQualityRow(.balanced, state: .ready, isSelected: false)
+        XCTAssertTrue(row.contains(L10n.t("quality.suffix.ready")))
+        XCTAssertFalse(row.contains(L10n.t("quality.suffix.inUse")))
+    }
+
+    // .system has no download size, so the size dot must not appear.
+    func testSystemRowOmitsSizeDot() {
+        let row = AppDelegate.formatQualityRow(.system, state: .ready, isSelected: true)
+        XCTAssertFalse(row.contains("MB"))
+    }
+
+    // Whisper tiers should still show their size.
+    func testWhisperRowIncludesSize() {
+        let row = AppDelegate.formatQualityRow(.high, state: .downloaded, isSelected: false)
+        XCTAssertTrue(row.contains("600 MB"))
+    }
+}

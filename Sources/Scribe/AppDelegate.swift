@@ -294,7 +294,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         for q in VoiceQuality.allCases {
             guard let item = qualityItems[q] else { continue }
             let state = ModelManager.shared.states[q] ?? .notDownloaded
-            item.title = formatQualityRow(q, state: state)
+            item.title = Self.formatQualityRow(q, state: state, isSelected: q == selected)
             item.state = (q == selected) ? .on : .off
         }
         refreshStatusInfo()
@@ -325,7 +325,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         item.title = "\(q.displayName) · \(detail)"
     }
 
-    private func formatQualityRow(_ q: VoiceQuality, state: ModelState) -> String {
+    /// Renders one quality row. The `.ready` state means "usable" (model loaded
+    /// or, for `.system`, OS-built-in). It only becomes "In Use" when this row
+    /// is also the user's current selection — otherwise we show "Ready", since
+    /// every Whisper variant the user has downloaded would otherwise misleadingly
+    /// claim to be in use simultaneously after a switch.
+    static func formatQualityRow(_ q: VoiceQuality, state: ModelState, isSelected: Bool) -> String {
         // `.system` has no download size, so suppress the size dot entirely.
         let sizePart = q.sizeLabel.isEmpty ? "" : "  ·  \(q.sizeLabel)"
         let suffix: String
@@ -337,7 +342,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             suffix = elapsed > 0
                 ? "  ·  " + String(format: L10n.t("quality.suffix.loadingElapsed"), elapsed)
                 : "  ·  \(L10n.t("quality.suffix.loading"))"
-        case .ready:              suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.inUse"))"
+        case .ready:
+            let label = isSelected ? L10n.t("quality.suffix.inUse") : L10n.t("quality.suffix.ready")
+            suffix = "\(sizePart)  ·  \(label)"
         case .failed:             suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.failed"))"
         }
         return q.displayName + suffix
