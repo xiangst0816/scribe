@@ -12,18 +12,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         updaterDelegate: nil,
         userDriverDelegate: nil
     )
-    private let appleProvider = AppleSpeechProvider()
     private let textInjector = TextInjector()
     private lazy var overlayPanel = OverlayPanel()
 
+    /// Single source of truth for the recording lifecycle. All transitions go
+    /// through `fnDown`, `fnUp`, or `handleTermination` — no flag juggling.
+    private enum SessionState {
+        case idle
+        case recording(session: AppleSpeechSession)
+        case armedToStop(session: AppleSpeechSession, work: DispatchWorkItem)
+        case transcribing(session: AppleSpeechSession)
+    }
+
+    private var sessionState: SessionState = .idle
     private var isEnabled = true
-    private var isRecording = false
-    private var isTranscribing = false
 
     /// Trailing audio captured after FN release. Users often let go a beat
     /// before they finish their sentence; this preserves those last words.
     private static let trailingBufferSeconds: TimeInterval = 0.5
-    private var pendingStop: DispatchWorkItem?
 
     private var enableMenuItem: NSMenuItem!
     private var langMenuItem: NSMenuItem!
@@ -36,19 +42,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "selectedLocaleCode") }
     }
 
+    private var currentLocale: Locale {
+        let code = selectedLocaleCode
+        return code.isEmpty ? .current : Locale(identifier: code)
+    }
+
     // MARK: - Lifecycle
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        let savedCode = selectedLocaleCode
-        if !savedCode.isEmpty {
-            appleProvider.locale = Locale(identifier: savedCode)
-        }
-        L10n.setLanguage(localeCode: savedCode)
+        L10n.setLanguage(localeCode: selectedLocaleCode)
 
         setupStatusBar()
-        setupProviderCallbacks()
 
-        AppleSpeechProvider.requestPermissions { [weak self] granted, errorMsg in
+        AppleSpeechSession.requestPermissions { [weak self] granted, errorMsg in
             if !granted, let msg = errorMsg {
                 self?.showAlert(title: L10n.t("alert.permissionRequired"), message: msg)
             }
@@ -76,80 +82,89 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Key events
 
     private func fnDown() {
-        // Re-pressing FN while a trailing-buffer stop is pending means the user
-        // wasn't done — cancel the pending stop and keep the same recording.
-        if let pending = pendingStop {
-            pending.cancel()
-            pendingStop = nil
+        // Re-pressing FN during the trailing-buffer window means the user
+        // wasn't done — keep the same session running.
+        if case let .armedToStop(session, work) = sessionState {
+            work.cancel()
+            sessionState = .recording(session: session)
             return
         }
 
-        guard isEnabled, !isRecording, !isTranscribing else { return }
+        guard isEnabled, case .idle = sessionState else { return }
 
-        isRecording = true
+        let session = AppleSpeechSession(locale: currentLocale)
+        session.onAudioLevel = { [weak self] level in
+            self?.overlayPanel.updateAudioLevel(level)
+        }
+        session.onPartial = { [weak self] text in
+            self?.overlayPanel.updatePartialTranscript(text)
+        }
+        session.onTerminated = { [weak self] reason in
+            self?.handleTermination(reason)
+        }
+
+        sessionState = .recording(session: session)
         updateStatusIcon()
         overlayPanel.show()
         NSSound(named: .init("Tink"))?.play()
-
-        appleProvider.start()
+        session.start()
     }
 
     private func fnUp() {
-        guard isRecording, pendingStop == nil else { return }
+        guard case let .recording(session) = sessionState else { return }
 
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.pendingStop = nil
-            self.isRecording = false
-            self.isTranscribing = true
+            guard case let .armedToStop(session, _) = self.sessionState else { return }
+            self.sessionState = .transcribing(session: session)
             self.updateStatusIcon()
             self.overlayPanel.showLoading()
-            self.appleProvider.stop()
+            session.stop()
         }
-        pendingStop = work
+        sessionState = .armedToStop(session: session, work: work)
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.trailingBufferSeconds, execute: work)
     }
 
-    // MARK: - Provider callbacks
+    // MARK: - Session termination
 
-    private func setupProviderCallbacks() {
-        appleProvider.onAudioLevel = { [weak self] level in
-            self?.overlayPanel.updateAudioLevel(level)
-        }
-        appleProvider.onPartialResult = { [weak self] text in
-            self?.overlayPanel.updatePartialTranscript(text)
-        }
-        appleProvider.onError = { [weak self] msg in
-            guard let self else { return }
-            self.isRecording = false
-            self.isTranscribing = false
-            self.updateStatusIcon()
-            NSLog("Scribe overlay error: %@", msg)
-            self.overlayPanel.dismiss()
-        }
-        appleProvider.onFinalResult = { [weak self] text in
-            self?.deliverFinal(text)
-        }
-        appleProvider.onLocaleUnavailable = { [weak self] msg in
-            self?.showAlert(title: L10n.t("alert.languageUnavailable"), message: msg)
+    private func handleTermination(_ reason: AppleSpeechSession.Termination) {
+        sessionState = .idle
+        updateStatusIcon()
+
+        switch reason {
+        case .final(let text):
+            deliverFinal(text)
+        case .cancelled:
+            overlayPanel.dismiss()
+        case .error(let message):
+            NSLog("Scribe speech error: %@", message)
+            overlayPanel.dismiss()
         }
     }
 
     private func deliverFinal(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        isTranscribing = false
-        updateStatusIcon()
-
-        guard !trimmed.isEmpty else {
-            overlayPanel.dismiss()
-            return
-        }
-
         overlayPanel.dismiss()
+        guard !trimmed.isEmpty else { return }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.textInjector.inject(trimmed)
             NSSound(named: .init("Pop"))?.play()
         }
+    }
+
+    private func resetSession() {
+        switch sessionState {
+        case .idle:
+            return
+        case .recording(let session), .transcribing(let session):
+            session.cancel()
+        case .armedToStop(let session, let work):
+            work.cancel()
+            session.cancel()
+        }
+        // session.cancel() triggers onTerminated → handleTermination,
+        // which moves the state machine back to .idle and updates UI.
     }
 
     // MARK: - Status bar
@@ -232,12 +247,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let symbolName: String
         let description: String
-        if isTranscribing {
-            symbolName = "waveform"
-            description = "Transcribing"
-        } else {
+        switch sessionState {
+        case .idle:
             symbolName = "mic.fill"
             description = "Voice Input"
+        case .recording, .armedToStop:
+            symbolName = "mic.fill"
+            description = "Recording"
+        case .transcribing:
+            symbolName = "waveform"
+            description = "Transcribing"
         }
         let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)
         img?.isTemplate = true
@@ -256,22 +275,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             keyMonitor.stop()
-            pendingStop?.cancel()
-            pendingStop = nil
-            if isRecording {
-                appleProvider.cancel()
-                overlayPanel.dismiss()
-                isRecording = false
-                isTranscribing = false
-                updateStatusIcon()
-            }
+            resetSession()
         }
     }
 
     @objc private func changeLanguage(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
         selectedLocaleCode = code
-        appleProvider.locale = code.isEmpty ? .current : Locale(identifier: code)
 
         for item in languageItems {
             item.state = (item.representedObject as? String) == code ? .on : .off
@@ -279,6 +289,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         L10n.setLanguage(localeCode: code)
         relocalizeStaticMenu()
+
+        let target = code.isEmpty ? Locale.current : Locale(identifier: code)
+        if !AppleSpeechSession.isLocaleSupported(target) {
+            showAlert(
+                title: L10n.t("alert.languageUnavailable"),
+                message: "Speech recognition is not supported for \(target.identifier). Confirm the language is downloaded in System Settings → General → Keyboard → Dictation."
+            )
+        }
     }
 
     @objc private func quit() {
