@@ -148,7 +148,7 @@ final class ModelManager {
             // partial bundle. Wipe the cache so the next click re-downloads
             // cleanly instead of re-failing on the same corrupt files.
             try? FileManager.default.removeItem(at: modelFolderURL(for: quality))
-            update(quality, .failed("Load failed"))
+            update(quality, .failed(L10n.t("error.loadFailed")))
             await fallbackToWorking(skipping: quality)
         }
     }

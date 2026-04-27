@@ -26,5 +26,13 @@
     <string>Scribe needs microphone access to record your speech for transcription.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Scribe uses speech recognition to convert your voice to text.</string>
+    <key>SUFeedURL</key>
+    <string>https://xiangst0816.github.io/scribe/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>Eb8Fd4vWO3grszv5ELdJ7xeuq25O3ixcG+EI3hfpF3I=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>

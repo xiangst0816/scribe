@@ -14,6 +14,12 @@ CODESIGN_FLAGS := --force --sign "$(CODESIGN_IDENTITY)"
 ifneq ($(CODESIGN_IDENTITY),-)
   CODESIGN_FLAGS += --options runtime --timestamp
 endif
+
+# Inner code (frameworks, helpers) gets the same hardening but no app
+# entitlements — Sparkle and its helpers ship with their own entitlements
+# baked into Info.plists, and granting them ours would over-permission them.
+CODESIGN_INNER_FLAGS := $(CODESIGN_FLAGS)
+
 ifneq ($(strip $(ENTITLEMENTS)),)
   CODESIGN_FLAGS += --entitlements "$(ENTITLEMENTS)"
 endif
@@ -26,16 +32,31 @@ build:
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
+	mkdir -p $(APP_BUNDLE)/Contents/Frameworks
 	cp $(BUILD_DIR)/$(APP_NAME) $(APP_BUNDLE)/Contents/MacOS/
 	cp Info.plist $(APP_BUNDLE)/Contents/
 	cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/
 	@for b in $(BUILD_DIR)/*.bundle; do \
 		[ -e "$$b" ] && cp -R "$$b" $(APP_BUNDLE)/Contents/Resources/ ; \
 	done
+	@if [ -d "$(BUILD_DIR)/Sparkle.framework" ]; then \
+		cp -R "$(BUILD_DIR)/Sparkle.framework" $(APP_BUNDLE)/Contents/Frameworks/ ; \
+		echo "📦 Embedded Sparkle.framework" ; \
+	fi
 	@if [ -n "$(VERSION)" ]; then \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" $(APP_BUNDLE)/Contents/Info.plist ; \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(VERSION)" $(APP_BUNDLE)/Contents/Info.plist ; \
 		echo "📌 Stamped version $(VERSION) into Info.plist" ; \
+	fi
+	@if [ -d "$(APP_BUNDLE)/Contents/Frameworks/Sparkle.framework" ]; then \
+		SF=$(APP_BUNDLE)/Contents/Frameworks/Sparkle.framework ; \
+		for x in "$$SF/Versions/B/XPCServices"/*.xpc ; do \
+			[ -e "$$x" ] && codesign $(CODESIGN_INNER_FLAGS) "$$x" ; \
+		done ; \
+		codesign $(CODESIGN_INNER_FLAGS) "$$SF/Versions/B/Updater.app" ; \
+		codesign $(CODESIGN_INNER_FLAGS) "$$SF/Versions/B/Autoupdate" ; \
+		codesign $(CODESIGN_INNER_FLAGS) "$$SF" ; \
+		echo "🔏 Signed Sparkle.framework" ; \
 	fi
 	codesign $(CODESIGN_FLAGS) $(APP_BUNDLE)
 	@echo "\n✅ Built $(APP_BUNDLE)"

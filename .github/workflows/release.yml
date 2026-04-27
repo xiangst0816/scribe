@@ -24,6 +24,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full history so the appcast step can fast-forward main and push back.
+          fetch-depth: 0
 
       - name: Select Xcode
         # macos-15 ships Xcode 16 by default, which provides Swift 6 — required by
@@ -158,6 +161,63 @@ jobs:
         env:
           KEYCHAIN_PATH: ${{ steps.keychain.outputs.keychain }}
         run: security delete-keychain "$KEYCHAIN_PATH" || true
+
+      - name: Sign update for Sparkle (EdDSA)
+        id: sparkle
+        if: github.event_name == 'push' && env.SPARKLE_PRIVATE_KEY != ''
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          # Pull just the sign_update binary out of Sparkle's release tarball.
+          curl -fsSL -o /tmp/sparkle.tar.xz \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz
+          mkdir -p /tmp/sparkle && tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle bin/sign_update
+          chmod +x /tmp/sparkle/bin/sign_update
+
+          # sign_update reads a private key file (the secret already is base64 of EdDSA seed).
+          KEY_FILE="$RUNNER_TEMP/sparkle_priv.txt"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+
+          # Output looks like: sparkle:edSignature="..." length="12345"
+          OUT="$(/tmp/sparkle/bin/sign_update -f "$KEY_FILE" Scribe.zip)"
+          rm -f "$KEY_FILE"
+          echo "Sparkle output: $OUT"
+
+          SIG="$(echo "$OUT" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')"
+          LEN="$(echo "$OUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+          if [ -z "$SIG" ] || [ -z "$LEN" ]; then
+            echo "Failed to parse sign_update output." >&2
+            exit 1
+          fi
+          echo "ed_signature=$SIG" >> "$GITHUB_OUTPUT"
+          echo "length=$LEN" >> "$GITHUB_OUTPUT"
+
+      - name: Update appcast.xml on main
+        if: steps.sparkle.outputs.ed_signature != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          ED_SIG: ${{ steps.sparkle.outputs.ed_signature }}
+          LENGTH: ${{ steps.sparkle.outputs.length }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')" \
+            python3 scripts/update_appcast.py
+
+          if git diff --quiet -- web/public/appcast.xml; then
+            echo "No appcast.xml changes to commit."
+            exit 0
+          fi
+          git add web/public/appcast.xml
+          git commit -m "Publish Sparkle appcast for ${TAG}"
+          git push origin main
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

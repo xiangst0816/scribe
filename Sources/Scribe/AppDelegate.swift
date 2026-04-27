@@ -1,9 +1,15 @@
 import AppKit
 import Speech
+import Sparkle
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let keyMonitor = KeyMonitor()
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
     private let appleProvider = AppleSpeechProvider()
     private let whisperProvider = WhisperSpeechProvider()
     private let textInjector = TextInjector()
@@ -227,6 +233,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         qualityMenuItem.submenu = qualityMenu
         menu.addItem(qualityMenuItem)
+
+        menu.addItem(.separator())
+
+        // Manual update check — Sparkle also runs an automatic background check
+        // once a day per Info.plist (SUScheduledCheckInterval / SUEnableAutomaticChecks).
+        let updateItem = NSMenuItem(
+            title: L10n.t("menu.checkForUpdates"),
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = updaterController
+        menu.addItem(updateItem)
 
         menu.addItem(.separator())
 
