@@ -59,7 +59,7 @@ make clean          # remove build artifacts
 
 ## First launch
 
-1. Open `Scribe.app`. It appears in the menu bar (pen-nib icon).
+1. Open `Scribe.app`. It appears in the menu bar with the Scribe icon.
 2. macOS will prompt for **Microphone**, **Speech Recognition**, and **Accessibility** permissions. Grant all three.
    - Accessibility is required to detect the `Fn` key globally and to paste into other apps.
 3. The Balanced model (~210 MB) starts downloading in the background. The menu bar icon shows progress; in the meantime Apple's built-in speech recognizer handles transcription.
