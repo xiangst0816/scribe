@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  # Required so the appcast step can dispatch the Pages workflow.
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -207,40 +209,6 @@ jobs:
           echo "ed_signature=$SIG" >> "$GITHUB_OUTPUT"
           echo "length=$LEN" >> "$GITHUB_OUTPUT"
 
-      - name: Update appcast.xml on main
-        if: steps.sparkle.outputs.ed_signature != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          REPO: ${{ github.repository }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          ED_SIG: ${{ steps.sparkle.outputs.ed_signature }}
-          LENGTH: ${{ steps.sparkle.outputs.length }}
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git pull --ff-only origin main
-
-          PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')" \
-            python3 scripts/update_appcast.py
-
-          # Stage first so newly-created files (the very first release) are
-          # also visible to the change check — `git diff` alone misses untracked.
-          git add web/public/appcast.xml
-          if git diff --cached --quiet -- web/public/appcast.xml; then
-            echo "No appcast.xml changes to commit."
-            exit 0
-          fi
-          git commit -m "Publish Sparkle appcast for ${TAG}"
-          git push origin main
-
-          # Pushes made with GITHUB_TOKEN don't trigger other workflows
-          # (anti-loop safety), so kick Pages off manually so users see the
-          # updated appcast within seconds, not on the next unrelated push.
-          gh workflow run "Deploy to GitHub Pages" --ref main
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -278,3 +246,38 @@ jobs:
               --title "Scribe $TAG" \
               --notes "$NOTES"
           fi
+
+      - name: Update appcast.xml on main
+        # Runs after the release exists so the appcast never references a 404 URL.
+        if: github.event_name == 'push' && steps.sparkle.outputs.ed_signature != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          ED_SIG: ${{ steps.sparkle.outputs.ed_signature }}
+          LENGTH: ${{ steps.sparkle.outputs.length }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')" \
+            python3 scripts/update_appcast.py
+
+          # Stage first so newly-created files (the very first release) are
+          # also visible to the change check — `git diff` alone misses untracked.
+          git add web/public/appcast.xml
+          if git diff --cached --quiet -- web/public/appcast.xml; then
+            echo "No appcast.xml changes to commit."
+            exit 0
+          fi
+          git commit -m "Publish Sparkle appcast for ${TAG}"
+          git push origin main
+
+          # Pushes made with GITHUB_TOKEN don't trigger other workflows
+          # (anti-loop safety), so kick Pages off manually so users see the
+          # updated appcast within seconds, not on the next unrelated push.
+          gh workflow run "Deploy to GitHub Pages" --ref main

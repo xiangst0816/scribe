@@ -281,8 +281,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             detail = String(format: L10n.t("status.downloadingFallback"), Int(p * 100))
         case .downloaded:
             detail = L10n.t("status.ready")
-        case .loading:
-            detail = L10n.t("status.loadingModel")
+        case .loading(let elapsed):
+            detail = elapsed > 0
+                ? String(format: L10n.t("status.loadingModelElapsed"), elapsed)
+                : L10n.t("status.loadingModel")
         case .ready:
             detail = L10n.t("status.active")
         case .failed(let msg):
@@ -297,7 +299,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .notDownloaded:      suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.download"))"
         case .downloading(let p): suffix = "  ·  " + String(format: L10n.t("quality.suffix.downloading"), Int(p * 100))
         case .downloaded:         suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.ready"))"
-        case .loading:            suffix = "  ·  \(L10n.t("quality.suffix.loading"))"
+        case .loading(let elapsed):
+            suffix = elapsed > 0
+                ? "  ·  " + String(format: L10n.t("quality.suffix.loadingElapsed"), elapsed)
+                : "  ·  \(L10n.t("quality.suffix.loading"))"
         case .ready:              suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.inUse"))"
         case .failed:             suffix = "  ·  \(q.sizeLabel)  ·  \(L10n.t("quality.suffix.failed"))"
         }

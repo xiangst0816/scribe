@@ -38,7 +38,7 @@ enum ModelState: Equatable {
     case notDownloaded
     case downloading(progress: Double)
     case downloaded
-    case loading
+    case loading(elapsedSeconds: Int)
     case ready
     case failed(String)
 }
@@ -84,14 +84,18 @@ final class ModelManager {
     func isDownloaded(_ quality: VoiceQuality) -> Bool {
         let folder = modelFolderURL(for: quality)
         let fm = FileManager.default
-        // A complete WhisperKit model has three CoreML bundles, each containing
-        // both a compiled program (model.mlmodel / model.mil) and its weights.
-        // Any of these missing usually means the download was interrupted.
+        // A complete .mlmodelc bundle has the compiled program (model.mil),
+        // CoreML metadata (coremldata.bin), and weights. The source
+        // `model.mlmodel` is sometimes shipped alongside but isn't required —
+        // requiring it would mistakenly mark MelSpectrogram (which never has
+        // it) as not-downloaded and re-download every model on every switch.
         for sub in ["AudioEncoder.mlmodelc", "MelSpectrogram.mlmodelc", "TextDecoder.mlmodelc"] {
             let bundle = folder.appendingPathComponent(sub, isDirectory: true)
-            let mlmodel = bundle.appendingPathComponent("model.mlmodel")
+            let mil = bundle.appendingPathComponent("model.mil")
+            let coreml = bundle.appendingPathComponent("coremldata.bin")
             let weights = bundle.appendingPathComponent("weights", isDirectory: true)
-            guard fm.fileExists(atPath: mlmodel.path),
+            guard fm.fileExists(atPath: mil.path),
+                  fm.fileExists(atPath: coreml.path),
                   let weightFiles = try? fm.contentsOfDirectory(atPath: weights.path),
                   !weightFiles.isEmpty else {
                 return false
@@ -125,8 +129,21 @@ final class ModelManager {
             }
         }
 
-        // Load CoreML models.
-        update(quality, .loading)
+        // Load CoreML models. WhisperKit doesn't expose granular progress, so we
+        // tick an elapsed-seconds counter while it works — gives the user
+        // visible reassurance that the app isn't hung during the 30s–2min that
+        // a fresh large-v3 load can take.
+        update(quality, .loading(elapsedSeconds: 0))
+        let loadStart = Date()
+        let ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { break }
+                let elapsed = Int(Date().timeIntervalSince(loadStart))
+                self?.update(quality, .loading(elapsedSeconds: elapsed))
+            }
+        }
+        defer { ticker.cancel() }
         do {
             let folder = modelFolderURL(for: quality)
             let config = WhisperKitConfig(
