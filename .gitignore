@@ -7,6 +7,8 @@ DerivedData/
 # Build artifacts
 Scribe.app/
 VoiceInput.app/
+Scribe.zip
+Scribe.dmg
 
 # Logs
 logs/
