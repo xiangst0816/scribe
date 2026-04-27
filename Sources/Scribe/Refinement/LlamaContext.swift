@@ -80,7 +80,12 @@ final class LlamaContext {
 
             var cparams = llama_context_default_params()
             cparams.n_ctx = nCtx
-            cparams.n_batch = 512
+            // The polish prompt + Qwen ChatML wrapper + few-shot examples is
+            // ~700–900 tokens on the long side; n_batch must fit the whole
+            // prompt-decode pass in one shot or llama_decode aborts with
+            // "n_tokens_all <= cparams.n_batch". 2048 leaves headroom for
+            // future prompt growth without paying for the full 4096 ctx.
+            cparams.n_batch = 2048
             guard let c = llama_init_from_model(m, cparams) else {
                 llama_model_free(m)
                 self.model = nil
@@ -163,9 +168,17 @@ final class LlamaContext {
         llama_sampler_chain_add(sampler, llama_sampler_init_temp(params.temperature))
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(params.seed))
 
-        var output = ""
+        // Accumulate raw token bytes here. Tokens may emit *partial* UTF-8
+        // sequences (CJK code points are 3 bytes; one byte per token is
+        // common). Building the result via per-token `String(cString:)`
+        // would split multi-byte sequences and produce U+FFFD replacement
+        // chars in the polished Chinese / Japanese / Korean output. We
+        // collect bytes and only flush to a String when the trailing bytes
+        // form a complete UTF-8 sequence.
+        var byteAccumulator: [UInt8] = []
+        byteAccumulator.reserveCapacity(params.maxNewTokens * 4)
         var nGenerated = 0
-        var pieceBuf = [CChar](repeating: 0, count: 128)
+        var pieceBuf = [UInt8](repeating: 0, count: 128)
 
         while nGenerated < params.maxNewTokens {
             // Cooperative cancellation — coordinator's withTimeout cancels the
@@ -176,14 +189,15 @@ final class LlamaContext {
             var nextTok = llama_sampler_sample(sampler, ctx, -1)
             if llama_vocab_is_eog(vocab, nextTok) { break }
 
-            let pieceLen = pieceBuf.withUnsafeMutableBufferPointer { buf in
-                llama_token_to_piece(vocab, nextTok,
-                                     buf.baseAddress, Int32(buf.count),
-                                     0 /* lstrip */, true /* special */)
+            let pieceLen = pieceBuf.withUnsafeMutableBufferPointer { buf -> Int32 in
+                buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) { rebound in
+                    llama_token_to_piece(vocab, nextTok,
+                                         rebound, Int32(buf.count),
+                                         0 /* lstrip */, true /* special */)
+                }
             }
             if pieceLen > 0 {
-                pieceBuf[Int(pieceLen)] = 0
-                output += String(cString: pieceBuf)
+                byteAccumulator.append(contentsOf: pieceBuf.prefix(Int(pieceLen)))
             }
 
             let stepBatch = llama_batch_get_one(&nextTok, 1)
@@ -192,7 +206,12 @@ final class LlamaContext {
             nGenerated += 1
         }
 
-        return output
+        // Decode the accumulated bytes as UTF-8. Done once at the end so we
+        // never split a multi-byte code point. Lossy conversion would fall
+        // back to U+FFFD on malformed bytes, which we'd rather see than
+        // crash; in practice the model outputs valid UTF-8 once the full
+        // token stream is in hand.
+        return String(decoding: byteAccumulator, as: UTF8.self)
     }
 
     /// Run a closure on the inference queue and bridge the result back to the
