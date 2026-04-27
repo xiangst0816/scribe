@@ -7,7 +7,19 @@
     <link>https://xiangst0816.github.io/scribe/appcast.xml</link>
     <description>Scribe — local dictation for macOS.</description>
     <language>en</language>
-                                                <item>
+                                                    <item>
+      <title>Version 0.2.14</title>
+      <link>https://github.com/xiangst0816/scribe/releases/tag/v0.2.14</link>
+      <sparkle:version>0.2.14</sparkle:version>
+      <sparkle:shortVersionString>0.2.14</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 27 Apr 2026 06:37:09 +0000</pubDate>
+      <enclosure url="https://github.com/xiangst0816/scribe/releases/download/v0.2.14/Scribe.zip"
+                 sparkle:edSignature="HMXcNKx1gEmcXKzEjab03qKJNH0HW4rYRg4YOED67HFWL+Ze43Y0ZnXwTFI7ucpnkrbFhYvznk0TmT4UHKeVDQ=="
+                 length="1835980"
+                 type="application/octet-stream"/>
+    </item>
+<item>
       <title>Version 0.2.13</title>
       <link>https://github.com/xiangst0816/scribe/releases/tag/v0.2.13</link>
       <sparkle:version>0.2.13</sparkle:version>
