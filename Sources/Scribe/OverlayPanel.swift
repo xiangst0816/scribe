@@ -135,15 +135,12 @@ final class OverlayPanel: NSPanel {
         transcriptLabel.translatesAutoresizingMaskIntoConstraints = false
         transcriptLabel.font = .systemFont(ofSize: 13, weight: .regular)
         transcriptLabel.textColor = NSColor.white.withAlphaComponent(0.95)
-        transcriptLabel.lineBreakMode = .byWordWrapping
-        transcriptLabel.maximumNumberOfLines = 3
+        // Single line, ellipsised at the tail. Segmenting by punctuation is
+        // handled upstream by `currentSentence(from:)`; the pill always shows
+        // the current sentence, never wraps to 3 lines.
+        transcriptLabel.lineBreakMode = .byTruncatingTail
+        transcriptLabel.maximumNumberOfLines = 1
         transcriptLabel.alignment = .center
-        transcriptLabel.cell?.wraps = true
-        transcriptLabel.cell?.isScrollable = false
-        // Tells the label what width to assume for line-wrapping calculations
-        // — without this its `intrinsicContentSize` reports a single-line size
-        // and the pill never grows tall enough for wrapped text.
-        transcriptLabel.preferredMaxLayoutWidth = transcriptWidth - 28
         transcriptBackground.addSubview(transcriptLabel)
 
         NSLayoutConstraint.activate([
@@ -205,12 +202,17 @@ final class OverlayPanel: NSPanel {
         transcriptBackground.animator().alphaValue = text.isEmpty ? 0 : 1
     }
 
-    /// Post-recording state: hide waveform, show spinner only.
+    /// Post-recording state (transcribing → polishing): hide waveform, show
+    /// spinner, and clear the transcript pill — the partial-text preview is
+    /// only relevant while the user is actively speaking. Keeping it on
+    /// during loading made the UI feel like the app didn't notice Fn was
+    /// released.
     func showLoading() {
         waveformView.isAnimating = false
         waveformView.isHidden = true
         spinnerView.isHidden = false
         spinnerView.start()
+        setTranscript("")
     }
 
     func dismiss() {
