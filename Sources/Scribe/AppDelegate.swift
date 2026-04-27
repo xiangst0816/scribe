@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Trailing audio captured after FN release. Users often let go a beat
     /// before they finish their sentence; this preserves those last words.
-    private static let trailingBufferSeconds: TimeInterval = 1.0
+    private static let trailingBufferSeconds: TimeInterval = 0.5
     private var pendingStop: DispatchWorkItem?
 
     private var enableMenuItem: NSMenuItem!
