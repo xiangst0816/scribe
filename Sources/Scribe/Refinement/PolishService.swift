@@ -27,14 +27,23 @@ protocol PolishService: AnyObject {
     func warmUp() async throws
     /// Run inference. Caller is responsible for timeout enforcement.
     func polish(_ raw: String, languageHint: String) async throws -> String
+
+    // Backend-specific lifecycle hooks. **Must be declared as protocol
+    // requirements** (not just extension defaults) — otherwise calls through
+    // a protocol-typed reference dispatch statically to the extension's
+    // no-op, never reaching the conforming type's override. That bug was
+    // shipped in v0.3.0 and silently broke the Local backend's Download
+    // button.
+    func startDownload(mirrorPreference: ModelMirrorPreference, localeCode: String)
+    func cancelDownload()
+    func purgeModel()
 }
 
 extension PolishService {
     func refreshAvailability() { /* no-op default */ }
 
-    /// Backend-specific lifecycle hooks. Defaulted to no-ops so the coordinator
-    /// can call them on any backend; only `LocalPolishService` actually
-    /// implements them today.
+    /// No-op defaults so backends that don't manage downloadable assets
+    /// (e.g. SystemPolishService) don't have to repeat empty stubs.
     func startDownload(mirrorPreference: ModelMirrorPreference, localeCode: String) {}
     func cancelDownload() {}
     func purgeModel() {}
