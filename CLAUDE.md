@@ -32,17 +32,18 @@ Code lives in two SwiftPM targets:
 
 ### Recording lifecycle (state machine)
 
-[AppDelegate.swift](Sources/Scribe/AppDelegate.swift) is the single source of truth for the recording lifecycle. The state machine has four states — **all transitions go through `fnDown`, `fnUp`, or `handleTermination`; do not introduce side-channel flag juggling.**
+[AppDelegate.swift](Sources/Scribe/AppDelegate.swift) is the single source of truth for the recording lifecycle. The state machine has five states — **all transitions go through `fnDown`, `fnUp`, `handleTermination`, or `cleanupAfterPolish`; do not introduce side-channel flag juggling.**
 
 ```
-idle ──fnDown──▶ recording ──fnUp──▶ armedToStop ──(0.5s)──▶ transcribing ──onTerminated──▶ idle
-                     ▲                     │
+idle ──fnDown──▶ recording ──fnUp──▶ armedToStop ──(0.5s)──▶ transcribing ──[final]──▶ polishing ──polish-done──▶ idle
+                     ▲                     │                                [cancel/error]──▶ idle
                      └──── fnDown ─────────┘   (re-press during trailing buffer keeps the same session)
 ```
 
 - **Trailing buffer**: 0.5s after `fnUp`, audio still feeds the recognizer. Re-pressing `Fn` during this window cancels the pending stop and continues the same session — users often release a beat early.
 - **`AppleSpeechSession` is single-use.** A terminated session cannot be restarted. This was [a deliberate rewrite](https://github.com/xiangst0816/scribe/commit/5dfdca5) to fix Fn going dead after errors; do not regress it by trying to reuse a session across recordings.
 - `onTerminated` fires exactly once, on the main thread. After it fires, no further callbacks fire.
+- **`.polishing` locks Fn out**. While the polish pipeline is running (typically 0.5–5 s on Apple Silicon, capped at the [PolishCoordinator timeout](Sources/Scribe/Refinement/PolishCoordinator.swift)), `fnDown`'s `.idle` guard rejects new presses and the loading overlay stays visible. The user explicitly asked for this behavior so they don't accidentally start a second recording while the model is still working on the first one.
 
 ### Components
 

@@ -22,7 +22,12 @@ final class PolishCoordinator {
     /// Hard timeout per polish call. Anything slower than this gets cancelled
     /// and the raw transcript is pasted instead — better to lose polish than
     /// to lose the recording.
-    static let timeoutSeconds: TimeInterval = 3.0
+    ///
+    /// Bumped from 3.0 → 5.0 in v0.4.1 because Gemma 4 E2B on slower Apple
+    /// Silicon (M2 Air, 8 GB) lands at 2–3 s per polish, occasionally clipping
+    /// 3 s and tripping the breaker. M4 Max stays well under 1 s, so this is
+    /// just slack for the bottom of the supported range.
+    static let timeoutSeconds: TimeInterval = 5.0
 
     /// After this many consecutive failures, master toggle auto-disables and
     /// the user is notified. Prevents a broken model from quietly eating every
@@ -220,6 +225,15 @@ final class PolishCoordinator {
             try validate(polished, against: raw)
             recordSuccess()
             final = polished
+        } catch PolishError.timeout {
+            // Timeout is a transient performance signal, not a hard failure.
+            // Quietly fall back to the raw transcript and DO NOT increment
+            // the breaker — otherwise users on slower Apple Silicon get
+            // their polish auto-disabled mid-session every time the model
+            // happens to clip the budget. Real failures (load error, bad
+            // output) still trip the breaker via the catch-all below.
+            NSLog("Scribe polish timeout (>%.1fs); pasting raw", Self.timeoutSeconds)
+            final = raw
         } catch {
             recordFailure(error.localizedDescription)
             final = raw

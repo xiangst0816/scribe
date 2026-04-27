@@ -22,16 +22,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastPolishWasSkipped = false
 
     /// Single source of truth for the recording lifecycle. All transitions go
-    /// through `fnDown`, `fnUp`, or `handleTermination` — no flag juggling.
+    /// through `fnDown`, `fnUp`, `handleTermination`, or `cleanupAfterPolish`
+    /// — no flag juggling.
     private enum SessionState {
         case idle
         case recording(session: AppleSpeechSession)
         case armedToStop(session: AppleSpeechSession, work: DispatchWorkItem)
         case transcribing(session: AppleSpeechSession)
+        /// Speech is done; the polish pipeline is running and the loading
+        /// overlay is still up. Fn is locked out (fnDown's `.idle` guard
+        /// rejects). Lasts ~0.5–5 s, ends in `cleanupAfterPolish`.
+        case polishing
     }
 
     private var sessionState: SessionState = .idle
     private var isEnabled = true
+
+    /// Held while `.polishing` so the user can't kick off a second polish on
+    /// top of an in-flight one, and so `resetSession` can cancel cleanly.
+    private var polishTask: Task<Void, Never>?
 
     /// Trailing audio captured after FN release. Users often let go a beat
     /// before they finish their sentence; this preserves those last words.
@@ -177,15 +186,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Session termination
 
     private func handleTermination(_ reason: AppleSpeechSession.Termination) {
-        sessionState = .idle
-        updateStatusIcon()
-
         switch reason {
         case .final(let text):
+            // Move to .polishing (NOT .idle) so Fn is locked out while polish
+            // runs and the loading overlay stays visible. cleanupAfterPolish
+            // moves us back to .idle when the paste finishes.
+            sessionState = .polishing
+            updateStatusIcon()
             deliverFinal(text)
         case .cancelled:
+            sessionState = .idle
+            updateStatusIcon()
             overlayPanel.dismiss()
         case .error(let message):
+            sessionState = .idle
+            updateStatusIcon()
             NSLog("Scribe speech error: %@", message)
             overlayPanel.dismiss()
         }
@@ -193,13 +208,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func deliverFinal(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        overlayPanel.dismiss()
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            overlayPanel.dismiss()
+            sessionState = .idle
+            updateStatusIcon()
+            return
+        }
 
         // Polish via the coordinator; on any failure or master-toggle-off this
         // returns the input unchanged. The 0.1s nudge before injection lets
         // the previous `cancel()` settle so cmd-V isn't intercepted mid-state.
-        Task { @MainActor [weak self] in
+        // We hold the task in `polishTask` so `resetSession` can cancel it.
+        polishTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let beforeFailures = self.polishCoordinator.consecutiveFailures
             let polished = await self.polishCoordinator.maybePolish(
@@ -208,11 +228,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self.lastPolishWasSkipped = (self.polishCoordinator.consecutiveFailures > beforeFailures)
             self.refreshPolishMenuItem()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.textInjector.inject(polished)
-                NSSound(named: .init("Pop"))?.play()
+
+            // If we got cancelled (user disabled Scribe / app quitting),
+            // skip the paste — pasting after the user's gesture is gone is
+            // worse than dropping the polish.
+            guard !Task.isCancelled else {
+                self.cleanupAfterPolish()
+                return
             }
+
+            try? await Task.sleep(nanoseconds: 100_000_000)  // settle
+            guard !Task.isCancelled else {
+                self.cleanupAfterPolish()
+                return
+            }
+            self.textInjector.inject(polished)
+            NSSound(named: .init("Pop"))?.play()
+            self.cleanupAfterPolish()
         }
+    }
+
+    /// Always called once at the end of the polish flow — dismisses the
+    /// loading overlay, returns the state machine to `.idle`, refreshes the
+    /// menu-bar icon. Idempotent so repeated calls (cancel race) are safe.
+    private func cleanupAfterPolish() {
+        polishTask = nil
+        overlayPanel.dismiss()
+        sessionState = .idle
+        updateStatusIcon()
     }
 
     private func resetSession() {
@@ -224,6 +267,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         case .armedToStop(let session, let work):
             work.cancel()
             session.cancel()
+        case .polishing:
+            polishTask?.cancel()
+            cleanupAfterPolish()
         }
         // session.cancel() triggers onTerminated → handleTermination,
         // which moves the state machine back to .idle and updates UI.
@@ -352,6 +398,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         case .transcribing:
             symbolName = "waveform"
             description = "Transcribing"
+        case .polishing:
+            // Same icon as transcribing — visually conveys "still processing"
+            // without inventing a new symbol the user has to learn.
+            symbolName = "waveform"
+            description = "Polishing"
         }
         let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)
         img?.isTemplate = true
