@@ -13,15 +13,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         userDriverDelegate: nil
     )
     private let appleProvider = AppleSpeechProvider()
-    private let whisperProvider = WhisperSpeechProvider()
     private let textInjector = TextInjector()
     private lazy var overlayPanel = OverlayPanel()
 
-    private var activeProvider: SpeechProvider?
     private var isEnabled = true
     private var isRecording = false
     private var isTranscribing = false
-    private var currentDownloadProgress: Double?
 
     /// Trailing audio captured after FN release. Users often let go a beat
     /// before they finish their sentence; this preserves those last words.
@@ -29,23 +26,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingStop: DispatchWorkItem?
 
     private var enableMenuItem: NSMenuItem!
-    private var statusInfoItem: NSMenuItem!
     private var langMenuItem: NSMenuItem!
     private var systemDefaultLangItem: NSMenuItem!
-    private var qualityMenuItem: NSMenuItem!
     private var quitMenuItem: NSMenuItem!
-    private var qualityItems: [VoiceQuality: NSMenuItem] = [:]
     private var languageItems: [NSMenuItem] = []
 
     private var selectedLocaleCode: String {
         get { UserDefaults.standard.string(forKey: "selectedLocaleCode") ?? "zh-CN" }
         set { UserDefaults.standard.set(newValue, forKey: "selectedLocaleCode") }
-    }
-
-    /// Map BCP-47 locale (zh-CN) to Whisper language code (zh). Empty = auto-detect.
-    private func whisperLanguageHint(from code: String) -> String? {
-        guard !code.isEmpty else { return nil }
-        return String(code.split(separator: "-").first ?? "")
     }
 
     // MARK: - Lifecycle
@@ -55,7 +43,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if !savedCode.isEmpty {
             appleProvider.locale = Locale(identifier: savedCode)
         }
-        whisperProvider.languageHint = whisperLanguageHint(from: savedCode)
         L10n.setLanguage(localeCode: savedCode)
 
         setupStatusBar()
@@ -84,12 +71,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.isEnabled else { return }
             _ = self.keyMonitor.start()
         }
-
-        // Observe model state, then trigger initial download/load of selected quality.
-        ModelManager.shared.onStateChange = { [weak self] quality, state in
-            self?.onModelStateChange(quality, state)
-        }
-        ModelManager.shared.ensureLoaded(ModelManager.shared.selectedQuality)
     }
 
     // MARK: - Key events
@@ -105,23 +86,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard isEnabled, !isRecording, !isTranscribing else { return }
 
-        // Honour the user's voice-quality choice. `.system` forces Apple Speech;
-        // the Whisper tiers prefer the loaded model and fall back to Apple if
-        // the kit isn't ready (still downloading, failed, etc.).
-        let provider: SpeechProvider
-        if ModelManager.shared.selectedQuality == .system {
-            provider = appleProvider
-        } else {
-            provider = whisperProvider.isReady ? whisperProvider : appleProvider
-        }
-        activeProvider = provider
-
         isRecording = true
         updateStatusIcon()
         overlayPanel.show()
         NSSound(named: .init("Tink"))?.play()
 
-        provider.start()
+        appleProvider.start()
     }
 
     private func fnUp() {
@@ -134,7 +104,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self.isTranscribing = true
             self.updateStatusIcon()
             self.overlayPanel.showLoading()
-            self.activeProvider?.stop()
+            self.appleProvider.stop()
         }
         pendingStop = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.trailingBufferSeconds, execute: work)
@@ -143,10 +113,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Provider callbacks
 
     private func setupProviderCallbacks() {
-        let onLevel: (Float) -> Void = { [weak self] level in
+        appleProvider.onAudioLevel = { [weak self] level in
             self?.overlayPanel.updateAudioLevel(level)
         }
-        let onError: (String) -> Void = { [weak self] msg in
+        appleProvider.onPartialResult = { [weak self] text in
+            self?.overlayPanel.updatePartialTranscript(text)
+        }
+        appleProvider.onError = { [weak self] msg in
             guard let self else { return }
             self.isRecording = false
             self.isTranscribing = false
@@ -154,20 +127,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("Scribe overlay error: %@", msg)
             self.overlayPanel.dismiss()
         }
-        let onFinal: (String) -> Void = { [weak self] text in
+        appleProvider.onFinalResult = { [weak self] text in
             self?.deliverFinal(text)
         }
-
-        appleProvider.onAudioLevel = onLevel
-        appleProvider.onError = onError
-        appleProvider.onFinalResult = onFinal
         appleProvider.onLocaleUnavailable = { [weak self] msg in
             self?.showAlert(title: L10n.t("alert.languageUnavailable"), message: msg)
         }
-
-        whisperProvider.onAudioLevel = onLevel
-        whisperProvider.onError = onError
-        whisperProvider.onFinalResult = onFinal
     }
 
     private func deliverFinal(_ text: String) {
@@ -187,21 +152,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Model state
-
-    private func onModelStateChange(_ quality: VoiceQuality, _ state: ModelState) {
-        // Track the *selected* quality's download progress for the status bar icon.
-        if quality == ModelManager.shared.selectedQuality {
-            switch state {
-            case .downloading(let p): currentDownloadProgress = p
-            default: currentDownloadProgress = nil
-            }
-            updateStatusIcon()
-        }
-
-        refreshQualityMenu()
-    }
-
     // MARK: - Status bar
 
     private func setupStatusBar() {
@@ -210,13 +160,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        // Top informational row — shows current voice model state at a glance.
-        statusInfoItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        statusInfoItem.isEnabled = false
-        menu.addItem(statusInfoItem)
-
-        menu.addItem(.separator())
-
         enableMenuItem = NSMenuItem(title: L10n.t("menu.enabled"), action: #selector(toggleEnabled), keyEquivalent: "")
         enableMenuItem.target = self
         enableMenuItem.state = .on
@@ -224,7 +167,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // Language submenu (Apple Speech fallback only)
+        // Language submenu — controls the SFSpeechRecognizer locale.
         langMenuItem = NSMenuItem(title: L10n.t("menu.language"), action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
         // (display title, locale code, isSystemDefault)
@@ -247,19 +190,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         langMenuItem.submenu = langMenu
         menu.addItem(langMenuItem)
-
-        // Voice Quality submenu
-        qualityMenuItem = NSMenuItem(title: L10n.t("menu.voiceQuality"), action: nil, keyEquivalent: "")
-        let qualityMenu = NSMenu()
-        for q in VoiceQuality.allCases {
-            let item = NSMenuItem(title: "", action: #selector(changeQuality(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = q.rawValue
-            qualityItems[q] = item
-            qualityMenu.addItem(item)
-        }
-        qualityMenuItem.submenu = qualityMenu
-        menu.addItem(qualityMenuItem)
 
         menu.addItem(.separator())
 
@@ -285,77 +215,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitMenuItem)
 
         statusItem.menu = menu
-
-        refreshQualityMenu()
     }
 
-    private func refreshQualityMenu() {
-        let selected = ModelManager.shared.selectedQuality
-        for q in VoiceQuality.allCases {
-            guard let item = qualityItems[q] else { continue }
-            let state = ModelManager.shared.states[q] ?? .notDownloaded
-            item.title = Self.formatQualityRow(q, state: state, isSelected: q == selected)
-            item.state = (q == selected) ? .on : .off
-        }
-        refreshStatusInfo()
-    }
-
-    private func refreshStatusInfo() {
-        guard let item = statusInfoItem else { return }
-        let q = ModelManager.shared.selectedQuality
-        let state = ModelManager.shared.states[q] ?? .notDownloaded
-
-        let detail: String
-        switch state {
-        case .notDownloaded:
-            detail = L10n.t("status.notDownloaded")
-        case .downloading(let p):
-            detail = String(format: L10n.t("status.downloadingFallback"), Int(p * 100))
-        case .downloaded:
-            detail = L10n.t("status.ready")
-        case .loading(let elapsed):
-            detail = elapsed > 0
-                ? String(format: L10n.t("status.loadingModelElapsed"), elapsed)
-                : L10n.t("status.loadingModel")
-        case .ready:
-            detail = L10n.t("status.active")
-        case .failed(let msg):
-            detail = String(format: L10n.t("status.failedRetrySuffix"), msg)
-        }
-        item.title = "\(q.displayName) · \(detail)"
-    }
-
-    /// Renders one quality row. The `.ready` state means "usable" (model loaded
-    /// or, for `.system`, OS-built-in). It only becomes "In Use" when this row
-    /// is also the user's current selection — otherwise we show "Ready", since
-    /// every Whisper variant the user has downloaded would otherwise misleadingly
-    /// claim to be in use simultaneously after a switch.
-    static func formatQualityRow(_ q: VoiceQuality, state: ModelState, isSelected: Bool) -> String {
-        // `.system` has no download size, so suppress the size dot entirely.
-        let sizePart = q.sizeLabel.isEmpty ? "" : "  ·  \(q.sizeLabel)"
-        let suffix: String
-        switch state {
-        case .notDownloaded:      suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.download"))"
-        case .downloading(let p): suffix = "  ·  " + String(format: L10n.t("quality.suffix.downloading"), Int(p * 100))
-        case .downloaded:         suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.ready"))"
-        case .loading(let elapsed):
-            suffix = elapsed > 0
-                ? "  ·  " + String(format: L10n.t("quality.suffix.loadingElapsed"), elapsed)
-                : "  ·  \(L10n.t("quality.suffix.loading"))"
-        case .ready:
-            let label = isSelected ? L10n.t("quality.suffix.inUse") : L10n.t("quality.suffix.ready")
-            suffix = "\(sizePart)  ·  \(label)"
-        case .failed:             suffix = "\(sizePart)  ·  \(L10n.t("quality.suffix.failed"))"
-        }
-        return q.displayName + suffix
-    }
-
-    /// Re-apply current localization to all static menu titles. Quality rows
-    /// and the status info line are refreshed via `refreshQualityMenu()`.
+    /// Re-apply current localization to all static menu titles.
     private func relocalizeStaticMenu() {
         enableMenuItem?.title = L10n.t("menu.enabled")
         langMenuItem?.title = L10n.t("menu.language")
-        qualityMenuItem?.title = L10n.t("menu.voiceQuality")
         quitMenuItem?.title = L10n.t("menu.quit")
         systemDefaultLangItem?.title = L10n.t("menu.systemDefault")
     }
@@ -363,15 +228,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusIcon() {
         guard let button = statusItem.button else { return }
         button.contentTintColor = nil  // always inherit menu-bar foreground
-
-        // Downloading the selected model takes priority in the icon.
-        if let progress = currentDownloadProgress {
-            let img = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Downloading")
-            img?.isTemplate = true
-            button.image = img
-            button.title = " \(Int(progress * 100))%"
-            return
-        }
         button.title = ""
 
         let symbolName: String
@@ -403,7 +259,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             pendingStop?.cancel()
             pendingStop = nil
             if isRecording {
-                activeProvider?.cancel()
+                appleProvider.cancel()
                 overlayPanel.dismiss()
                 isRecording = false
                 isTranscribing = false
@@ -416,7 +272,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let code = sender.representedObject as? String else { return }
         selectedLocaleCode = code
         appleProvider.locale = code.isEmpty ? .current : Locale(identifier: code)
-        whisperProvider.languageHint = whisperLanguageHint(from: code)
 
         for item in languageItems {
             item.state = (item.representedObject as? String) == code ? .on : .off
@@ -424,15 +279,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         L10n.setLanguage(localeCode: code)
         relocalizeStaticMenu()
-        refreshQualityMenu()
-    }
-
-    @objc private func changeQuality(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let quality = VoiceQuality(rawValue: raw) else { return }
-        ModelManager.shared.selectedQuality = quality
-        ModelManager.shared.ensureLoaded(quality)
-        refreshQualityMenu()
     }
 
     @objc private func quit() {

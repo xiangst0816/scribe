@@ -3,6 +3,7 @@ import Speech
 
 final class AppleSpeechProvider: SpeechProvider {
     var onAudioLevel: ((Float) -> Void)?
+    var onPartialResult: ((String) -> Void)?
     var onFinalResult: ((String) -> Void)?
     var onError: ((String) -> Void)?
     var onLocaleUnavailable: ((String) -> Void)?
@@ -82,6 +83,10 @@ final class AppleSpeechProvider: SpeechProvider {
                 self.lastPartialText = text
                 if result.isFinal {
                     self.deliverFinal(text)
+                } else {
+                    // Stream interim text out so the overlay can show what
+                    // the user is saying as they speak.
+                    self.onPartialResult?(text)
                 }
             }
             if let error, (error as NSError).code != 216 {
