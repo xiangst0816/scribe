@@ -12,6 +12,7 @@ const t = useTranslations(lang);
 
 const REPO = 'https://github.com/xiangst0816/scribe';
 const RELEASES = `${REPO}/releases/latest`;
+const DOWNLOAD = `${REPO}/releases/latest/download/Scribe.zip`;
 const BASE = import.meta.env.BASE_URL;
 const ICON = `${BASE}/icon.png`;
 const ICONS_BASE = `${BASE}/app-icons`;
@@ -114,7 +115,7 @@ const langOptions = (Object.keys(languages) as Lang[]).map((l) => ({
       </div>
     </div>
 
-    <a class="button button-small cta-desktop" href={RELEASES}>{t('nav.cta')}</a>
+    <a class="button button-small cta-desktop" href={DOWNLOAD}>{t('nav.cta')}</a>
   </div>
 </nav>
 
@@ -125,7 +126,7 @@ const langOptions = (Object.keys(languages) as Lang[]).map((l) => ({
       <h1>{t('hero.title')}</h1>
       <p class="lead">{t('hero.lead')}</p>
       <div class="actions">
-        <a class="button" href={RELEASES}>{t('hero.cta.download')}</a>
+        <a class="button" href={DOWNLOAD}>{t('hero.cta.download')}</a>
         <a class="button button-secondary" href={REPO}>{t('hero.cta.source')}</a>
       </div>
       <div class="hero-facts" aria-label="Product facts">
@@ -274,7 +275,7 @@ const langOptions = (Object.keys(languages) as Lang[]).map((l) => ({
     <h2>{t('final.title')}</h2>
     <p>{t('final.lead')}</p>
     <div class="actions">
-      <a class="button" href={RELEASES}>{t('final.cta.download')}</a>
+      <a class="button" href={DOWNLOAD}>{t('final.cta.download')}</a>
       <a class="button button-secondary" href={REPO}>{t('final.cta.github')}</a>
     </div>
   </section>

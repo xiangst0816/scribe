@@ -1,0 +1,172 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 1.2.3). Leave blank to use the run number.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Resolve version
+        id: ver
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            VERSION="${REF_NAME#v}"
+          else
+            VERSION="$INPUT_VERSION"
+            [ -z "$VERSION" ] && VERSION="0.0.0+${RUN_NUMBER}"
+          fi
+          # Strip anything outside [A-Za-z0-9._+-] to neutralize injection-prone input.
+          VERSION="$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9._+-')"
+          if [ -z "$VERSION" ]; then
+            echo "Resolved version is empty after sanitization." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building Scribe $VERSION"
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Import signing certificate
+        id: keychain
+        env:
+          CERT_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_BASE64" ]; then
+            echo "no_cert=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::MACOS_CERT_P12_BASE64 not set — falling back to ad-hoc signing (no notarization)."
+            exit 0
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+
+          printf '%s' "$CERT_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          rm -f "$CERT_PATH"
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          if [ -z "$IDENTITY" ]; then
+            echo "No 'Developer ID Application' identity found in imported certificate." >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" >&2
+            exit 1
+          fi
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "keychain=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
+          echo "Signing as: $IDENTITY"
+
+      - name: Build & package
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          NO_CERT: ${{ steps.keychain.outputs.no_cert }}
+        run: |
+          if [ -n "$NO_CERT" ]; then
+            make release VERSION="$VERSION"
+          else
+            make release VERSION="$VERSION" \
+              CODESIGN_IDENTITY="$IDENTITY" \
+              ENTITLEMENTS=Scribe.entitlements
+          fi
+
+      - name: Notarize & staple
+        if: steps.keychain.outputs.identity != ''
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          echo "→ Submitting Scribe.zip to notarytool…"
+          xcrun notarytool submit Scribe.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APP_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait
+
+          echo "→ Stapling ticket to Scribe.app…"
+          xcrun stapler staple Scribe.app
+          xcrun stapler validate Scribe.app
+          spctl --assess --type execute --verbose=2 Scribe.app
+
+          echo "→ Re-zipping stapled bundle…"
+          rm -f Scribe.zip
+          ditto -c -k --keepParent Scribe.app Scribe.zip
+
+      - name: Clean up keychain
+        if: always() && steps.keychain.outputs.keychain != ''
+        env:
+          KEYCHAIN_PATH: ${{ steps.keychain.outputs.keychain }}
+        run: security delete-keychain "$KEYCHAIN_PATH" || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scribe-${{ steps.ver.outputs.version }}
+          path: Scribe.zip
+          if-no-files-found: error
+
+      - name: Create / update GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          NOTARIZED: ${{ steps.keychain.outputs.identity != '' }}
+        run: |
+          if [ "$NOTARIZED" = "true" ]; then
+            TRUST_LINE="- Signed & notarized by Apple — opens with one click."
+          else
+            TRUST_LINE="- Ad-hoc signed; right-click → Open on first launch."
+          fi
+          NOTES="Automated build of \`$TAG\`.
+
+          - macOS 14+ · Apple Silicon
+          $TRUST_LINE
+
+          See [README](https://github.com/${REPO}#readme) for setup."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Scribe.zip --clobber
+          else
+            gh release create "$TAG" Scribe.zip \
+              --title "Scribe $TAG" \
+              --notes "$NOTES"
+          fi
