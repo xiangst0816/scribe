@@ -76,6 +76,15 @@ final class LocalPolishService: PolishService {
         refreshAvailability()
     }
 
+    /// Release the in-memory llama context (synchronously, via `deinit`) so
+    /// `llama_free` / `llama_model_free` happen before the process tears down
+    /// its global state. Called from `AppDelegate.applicationWillTerminate`.
+    /// Does NOT touch the on-disk model file.
+    func releaseContextForShutdown() {
+        context = nil
+        contextWarmedUp = false
+    }
+
     func warmUp() async throws {
         guard isReady else {
             throw PolishError.unavailable(statusText)

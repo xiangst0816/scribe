@@ -45,6 +45,11 @@ final class LlamaContext {
     private var vocab: OpaquePointer?
     private var nCtx: UInt32 = 4096
 
+    /// Tracks whether `llama_backend_init()` has run in this process. Used by
+    /// `tearDownProcessBackend` to skip the free if no llama context was ever
+    /// loaded (e.g. user never enabled Local backend).
+    nonisolated(unsafe) private static var backendInitialized = false
+
     /// Backend init must happen exactly once per process. Done lazily here.
     private static let backendOnce: Void = {
         // Silence ggml/llama log spam in production. The framework otherwise
@@ -52,7 +57,22 @@ final class LlamaContext {
         // pollute Console.app for every Polish call.
         llama_log_set({ _, _, _ in }, nil)
         llama_backend_init()
+        LlamaContext.backendInitialized = true
     }()
+
+    /// Drain ggml's process-wide state. Must run **before** NSApplication's
+    /// `exit()` calls C++ static destructors, otherwise the destructor for
+    /// the global `vector<ggml_metal_device>` races against any background
+    /// `__ggml_metal_rsets_init_block_invoke` still compiling pipelines and
+    /// `ggml_abort()` → SIGABRT (this is what crashed v0.3.3 on Cmd-Q).
+    ///
+    /// Idempotent — safe to call from `applicationWillTerminate` whether or
+    /// not the Local backend was ever warmed up.
+    static func tearDownProcessBackend() {
+        guard backendInitialized else { return }
+        llama_backend_free()
+        backendInitialized = false
+    }
 
     init(modelPath: String) {
         _ = LlamaContext.backendOnce

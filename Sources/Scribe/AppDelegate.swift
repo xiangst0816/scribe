@@ -115,6 +115,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Drain anything llama.cpp / Metal-related before NSApplication runs
+    /// `exit()`. Without this, the C++ static destructor of ggml's global
+    /// device vector races against a background pipeline-compile dispatch
+    /// block and trips `ggml_abort` → SIGABRT (the crash users saw on Cmd-Q
+    /// in v0.3.3).
+    public func applicationWillTerminate(_ notification: Notification) {
+        keyMonitor.stop()
+        if let local = polishCoordinator.local as? LocalPolishService {
+            local.releaseContextForShutdown()
+        }
+        LlamaContext.tearDownProcessBackend()
+    }
+
     // MARK: - Key events
 
     private func fnDown() {
