@@ -3,7 +3,7 @@ import Speech
 import Sparkle
 
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     public override init() { super.init() }
 
     private var statusItem: NSStatusItem!
@@ -49,6 +49,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var enableMenuItem: NSMenuItem!
     private var langMenuItem: NSMenuItem!
     private var systemDefaultLangItem: NSMenuItem!
+    private var micMenuItem: NSMenuItem!
+    private var micSubmenu: NSMenu!
     private var quitMenuItem: NSMenuItem!
     private var languageItems: [NSMenuItem] = []
 
@@ -314,6 +316,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         langMenuItem.submenu = langMenu
         menu.addItem(langMenuItem)
 
+        // Microphone submenu — chooses which input device the recognizer reads
+        // from. Items are rebuilt on `menuNeedsUpdate(_:)` so freshly-plugged
+        // devices appear without relaunch.
+        micMenuItem = NSMenuItem(title: L10n.t("menu.microphone"), action: nil, keyEquivalent: "")
+        micSubmenu = NSMenu(title: L10n.t("menu.microphone"))
+        micSubmenu.delegate = self
+        rebuildMicrophoneSubmenu()
+        micMenuItem.submenu = micSubmenu
+        menu.addItem(micMenuItem)
+
         menu.addItem(.separator())
 
         // Polish status (read-only; clicking opens the Settings window).
@@ -357,10 +369,64 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func relocalizeStaticMenu() {
         enableMenuItem?.title = L10n.t("menu.enabled")
         langMenuItem?.title = L10n.t("menu.language")
+        micMenuItem?.title = L10n.t("menu.microphone")
         quitMenuItem?.title = L10n.t("menu.quit")
         systemDefaultLangItem?.title = L10n.t("menu.systemDefault")
         settingsMenuItem?.title = L10n.t("menu.settings")
+        rebuildMicrophoneSubmenu()
         refreshPolishMenuItem()
+    }
+
+    // MARK: - Microphone submenu
+
+    private func rebuildMicrophoneSubmenu() {
+        guard let micSubmenu else { return }
+        micSubmenu.removeAllItems()
+        let pref = MicrophoneRouter.shared.preference
+
+        let autoItem = NSMenuItem(
+            title: L10n.t("menu.mic.auto"),
+            action: #selector(selectMicAuto),
+            keyEquivalent: ""
+        )
+        autoItem.target = self
+        autoItem.state = (pref == .auto) ? .on : .off
+        micSubmenu.addItem(autoItem)
+
+        let sysItem = NSMenuItem(
+            title: L10n.t("menu.systemDefault"),
+            action: #selector(selectMicSystemDefault),
+            keyEquivalent: ""
+        )
+        sysItem.target = self
+        sysItem.state = (pref == .systemDefault) ? .on : .off
+        micSubmenu.addItem(sysItem)
+
+        let devices = MicrophoneRouter.inputDevices()
+        if !devices.isEmpty {
+            micSubmenu.addItem(.separator())
+            for device in devices {
+                let item = NSMenuItem(
+                    title: device.name,
+                    action: #selector(selectMicSpecific(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = device.uid
+                if case .specific(let uid) = pref, uid == device.uid {
+                    item.state = .on
+                }
+                micSubmenu.addItem(item)
+            }
+        }
+    }
+
+    /// AppKit calls this right before the submenu is displayed. Re-enumerate
+    /// devices so freshly-plugged hardware shows up without a relaunch.
+    public func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === micSubmenu {
+            rebuildMicrophoneSubmenu()
+        }
     }
 
     /// Update the "Polish: <state>" menu item based on coordinator state.
@@ -452,6 +518,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Speech recognition is not supported for \(target.identifier). Confirm the language is downloaded in System Settings → General → Keyboard → Dictation."
             )
         }
+    }
+
+    @objc private func selectMicAuto() {
+        MicrophoneRouter.shared.preference = .auto
+        rebuildMicrophoneSubmenu()
+    }
+
+    @objc private func selectMicSystemDefault() {
+        MicrophoneRouter.shared.preference = .systemDefault
+        rebuildMicrophoneSubmenu()
+    }
+
+    @objc private func selectMicSpecific(_ sender: NSMenuItem) {
+        guard let uid = sender.representedObject as? String else { return }
+        MicrophoneRouter.shared.preference = .specific(uid: uid)
+        rebuildMicrophoneSubmenu()
     }
 
     @objc private func quit() {

@@ -111,6 +111,18 @@ final class AppleSpeechSession {
             }
         }
 
+        // Honour the user's microphone preference *before* the inputNode's
+        // format is queried — the format depends on the underlying device.
+        // A failure here falls back to whatever device the input node had,
+        // which is the system default; no point surfacing it to the user.
+        if let deviceID = MicrophoneRouter.shared.resolvedDeviceID() {
+            do {
+                try audioEngine.inputNode.auAudioUnit.setDeviceID(deviceID)
+            } catch {
+                NSLog("Scribe mic: failed to set input device %u: %@", deviceID, error.localizedDescription)
+            }
+        }
+
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
