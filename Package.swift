@@ -43,5 +43,15 @@ let package = Package(
             dependencies: ["ScribeCore"],
             path: "Tests/ScribeCoreTests"
         ),
+        // Local-only eval harness for the polish prompt. Not part of the
+        // shipped app or CI; remove after evaluation work is done.
+        .executableTarget(
+            name: "PolishEval",
+            dependencies: ["ScribeCore"],
+            path: "Tools/PolishEval",
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks"]),
+            ]
+        ),
     ]
 )
