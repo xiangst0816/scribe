@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## How the user talks to you
+
+The user dictates every message through Scribe itself — this repo is the dictation app they're using to type to you. Their input is ASR output, often Chinese with embedded English identifiers, and homophone / near-homophone errors are expected. Real examples seen in this project's own chats:
+
+- "跟目录" → "根目录" (root directory)
+- "靠的DMD" → "CLAUDE.md" ("Claude" misheard as "靠的", ".md" spelled as "DMD")
+- "没挺正确" → "没听正确"
+
+When a word looks wrong in context, infer the intended word from surrounding code/file references and **call out the likely correction** in your reply rather than silently guessing or pretending you understood. File extensions, project names, and CamelCase identifiers are the most common failure modes — flag recurring patterns so the user can improve Scribe's polish prompt or term list.
+
 ## Build & test
 
 Scribe is a SwiftPM project — there is no Xcode project, only [Package.swift](Package.swift) plus a [Makefile](Makefile) that wraps `swift build` with `.app` bundling, Sparkle embedding, and ad-hoc codesign.
