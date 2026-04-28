@@ -1,15 +1,16 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ScribeCore
 
 /// Covers `PolishCoordinator` — the timeout, validation, and circuit-breaker
 /// behaviour that decides whether a polish call's output makes it to the user
 /// or whether we silently fall back to the raw transcript.
-@MainActor
-final class PolishCoordinatorTests: XCTestCase {
+@Suite @MainActor
+final class PolishCoordinatorTests {
 
-    private var coordinator: PolishCoordinator!
+    private let coordinator: PolishCoordinator
 
-    override func setUp() async throws {
+    init() {
         // Each test gets its own coordinator with a fresh defaults suite so
         // persistence (polish.enabled, polish.backend) doesn't bleed across
         // tests or pick up the developer's real choices.
@@ -18,20 +19,20 @@ final class PolishCoordinatorTests: XCTestCase {
         coordinator = PolishCoordinator(testDefaults: UserDefaults(suiteName: suiteName)!)
     }
 
-    func testNoPolishWhenDisabled() async {
+    @Test func noPolishWhenDisabled() async {
         coordinator.isEnabled = false
         let result = await coordinator.maybePolish("hello", selectedLocaleCode: "en-US")
-        XCTAssertEqual(result, "hello")
+        #expect(result == "hello")
     }
 
-    func testNoPolishWhenSelectedBackendIsNotReady() async {
+    @Test func noPolishWhenSelectedBackendIsNotReady() async {
         coordinator.isEnabled = true
         coordinator.selectedBackend = .local  // stub, not ready
         let result = await coordinator.maybePolish("hello", selectedLocaleCode: "en-US")
-        XCTAssertEqual(result, "hello")
+        #expect(result == "hello")
     }
 
-    func testCircuitBreakerTripsAfterThreeFailures() async {
+    @Test func circuitBreakerTripsAfterThreeFailures() async {
         coordinator.isEnabled = true
         coordinator.injectStubService(StubFailingService(), as: .local)
         coordinator.selectedBackend = .local
@@ -43,64 +44,116 @@ final class PolishCoordinatorTests: XCTestCase {
             _ = await coordinator.maybePolish("hello", selectedLocaleCode: "en-US")
         }
 
-        XCTAssertEqual(coordinator.consecutiveFailures, 3)
-        XCTAssertTrue(coordinator.isBreakerTripped)
-        XCTAssertFalse(coordinator.isEnabled, "Breaker tripping must flip the master switch off")
-        XCTAssertNotNil(trippedMessage)
+        #expect(coordinator.consecutiveFailures == 3)
+        #expect(coordinator.isBreakerTripped)
+        #expect(!coordinator.isEnabled, "Breaker tripping must flip the master switch off")
+        #expect(trippedMessage != nil)
     }
 
-    func testSuccessResetsFailureCounter() async {
+    @Test func successResetsFailureCounter() async {
         coordinator.isEnabled = true
         let svc = StubFlakyService(throwOnFirstNCalls: 1)
         coordinator.injectStubService(svc, as: .local)
         coordinator.selectedBackend = .local
 
         let first = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
-        XCTAssertEqual(first, "hi", "First call throws → falls back to raw")
-        XCTAssertEqual(coordinator.consecutiveFailures, 1)
+        #expect(first == "hi", "First call throws → falls back to raw")
+        #expect(coordinator.consecutiveFailures == 1)
 
         let second = await coordinator.maybePolish("hi there", selectedLocaleCode: "en-US")
-        XCTAssertEqual(second, "POLISHED: hi there")
-        XCTAssertEqual(coordinator.consecutiveFailures, 0, "Successful call resets the counter")
+        #expect(second == "POLISHED: hi there")
+        #expect(coordinator.consecutiveFailures == 0, "Successful call resets the counter")
     }
 
-    func testEmptyOutputIsTreatedAsFailure() async {
+    @Test func emptyOutputIsTreatedAsFailure() async {
         coordinator.isEnabled = true
         coordinator.injectStubService(StubReturning(""), as: .local)
         coordinator.selectedBackend = .local
 
         let result = await coordinator.maybePolish("the original", selectedLocaleCode: "en-US")
-        XCTAssertEqual(result, "the original")
-        XCTAssertEqual(coordinator.consecutiveFailures, 1)
+        #expect(result == "the original")
+        #expect(coordinator.consecutiveFailures == 1)
     }
 
-    func testLengthExplosionIsTreatedAsFailure() async {
+    @Test func lengthExplosionIsTreatedAsFailure() async {
         coordinator.isEnabled = true
         let runaway = String(repeating: "x", count: 1000)
         coordinator.injectStubService(StubReturning(runaway), as: .local)
         coordinator.selectedBackend = .local
 
         let result = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
-        XCTAssertEqual(result, "hi", "Output 500x longer than input is rejected; raw is pasted")
-        XCTAssertEqual(coordinator.consecutiveFailures, 1)
+        #expect(result == "hi", "Output 500x longer than input is rejected; raw is pasted")
+        #expect(coordinator.consecutiveFailures == 1)
     }
 
-    func testTimeoutFallsBackToRaw() async {
+    @Test func timeoutFallsBackToRaw() async {
         coordinator.isEnabled = true
-        coordinator.injectStubService(StubSlowService(delaySeconds: 5), as: .local)
+        coordinator.injectStubService(StubSlowService(delaySeconds: 30), as: .local)
         coordinator.selectedBackend = .local
 
         let start = Date()
         let result = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
         let elapsed = Date().timeIntervalSince(start)
 
-        XCTAssertEqual(result, "hi")
-        XCTAssertLessThan(elapsed, PolishCoordinator.timeoutSeconds + 1.0,
-                          "Must abort by the configured timeout, not wait the full delay")
-        XCTAssertEqual(coordinator.consecutiveFailures, 1)
+        #expect(result == "hi")
+        #expect(
+            elapsed < PolishCoordinator.timeoutSeconds + 1.0,
+            "Must abort by the configured timeout, not wait the full delay"
+        )
+
+        // R4: timeouts MUST NOT increment the breaker counter — slow Apple
+        // Silicon would otherwise auto-disable polish mid-session every time
+        // the model happens to clip the budget. Timeouts are tracked
+        // separately so the menu can still surface them.
+        #expect(
+            coordinator.consecutiveFailures == 0,
+            "Timeout must not increment consecutiveFailures (would trip breaker on slow hardware)"
+        )
+        #expect(
+            coordinator.lastCallTimedOut,
+            "Menu needs lastCallTimedOut to surface the silent fallback to the user"
+        )
+        #expect(coordinator.consecutiveTimeouts == 1)
     }
 
-    func testResetCircuitBreakerClearsState() async {
+    @Test func successAfterTimeoutClearsLastCallTimedOut() async {
+        coordinator.isEnabled = true
+        coordinator.injectStubService(StubSlowService(delaySeconds: 30), as: .local)
+        coordinator.selectedBackend = .local
+
+        // First call times out.
+        _ = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
+        #expect(coordinator.lastCallTimedOut)
+        #expect(coordinator.consecutiveTimeouts == 1)
+
+        // Swap in a fast stub. A single successful polish must clear the
+        // timeout flag (otherwise the menu sticks at "Skipped (timed out)"
+        // forever even after polish recovered).
+        coordinator.injectStubService(StubReturning("POLISHED: hi"), as: .local)
+        let result = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
+        #expect(result == "POLISHED: hi")
+        #expect(!coordinator.lastCallTimedOut)
+        #expect(coordinator.consecutiveTimeouts == 0)
+    }
+
+    @Test func repeatedTimeoutsDoNotTripBreaker() async {
+        // The whole reason timeouts and failures count separately. Many
+        // timeouts in a row on slow hardware must NOT auto-disable polish.
+        coordinator.isEnabled = true
+        coordinator.injectStubService(StubSlowService(delaySeconds: 30), as: .local)
+        coordinator.selectedBackend = .local
+
+        for _ in 0..<5 {
+            _ = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
+        }
+
+        #expect(!coordinator.isBreakerTripped)
+        #expect(coordinator.isEnabled)
+        #expect(coordinator.consecutiveFailures == 0)
+        #expect(coordinator.consecutiveTimeouts == 5)
+    }
+
+    @Test func resetCircuitBreakerClearsState() async {
         coordinator.isEnabled = true
         coordinator.injectStubService(StubFailingService(), as: .local)
         coordinator.selectedBackend = .local
@@ -108,16 +161,16 @@ final class PolishCoordinatorTests: XCTestCase {
         for _ in 0..<3 {
             _ = await coordinator.maybePolish("hi", selectedLocaleCode: "en-US")
         }
-        XCTAssertTrue(coordinator.isBreakerTripped)
+        #expect(coordinator.isBreakerTripped)
 
         coordinator.resetCircuitBreaker()
-        XCTAssertEqual(coordinator.consecutiveFailures, 0)
-        XCTAssertFalse(coordinator.isBreakerTripped)
+        #expect(coordinator.consecutiveFailures == 0)
+        #expect(!coordinator.isBreakerTripped)
     }
 
     // MARK: - Adaptive (Phase 5.1)
 
-    func testAdaptiveCaptureIsGatedOnToggle() async {
+    @Test func adaptiveCaptureIsGatedOnToggle() async {
         // Use a separate persona store so we don't pollute the user's real one.
         let suiteName = "ScribeTests-adaptive-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -133,16 +186,16 @@ final class PolishCoordinatorTests: XCTestCase {
         // Adaptive OFF — nothing gets recorded even on success.
         coord.isAdaptiveEnabled = false
         _ = await coord.maybePolish("hello", selectedLocaleCode: "en-US")
-        XCTAssertEqual(persona.recent.count, 0)
+        #expect(persona.recent.count == 0)
 
         // Adaptive ON — the polished output gets captured.
         coord.isAdaptiveEnabled = true
         _ = await coord.maybePolish("hello again", selectedLocaleCode: "en-US")
-        XCTAssertEqual(persona.recent.count, 1)
-        XCTAssertEqual(persona.recent[0].text, "polished result")
+        #expect(persona.recent.count == 1)
+        #expect(persona.recent[0].text == "polished result")
     }
 
-    func testAdaptiveCapturesRawOnPolishFallback() async {
+    @Test func adaptiveCapturesRawOnPolishFallback() async {
         let suiteName = "ScribeTests-fallback-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let persona = PersonaStore.shared
@@ -158,12 +211,12 @@ final class PolishCoordinatorTests: XCTestCase {
         let result = await coord.maybePolish("the user spoke this", selectedLocaleCode: "en-US")
         // Polish failed → coordinator returns raw → raw is what got "pasted",
         // and that's what L3 records.
-        XCTAssertEqual(result, "the user spoke this")
-        XCTAssertEqual(persona.recent.count, 1)
-        XCTAssertEqual(persona.recent[0].text, "the user spoke this")
+        #expect(result == "the user spoke this")
+        #expect(persona.recent.count == 1)
+        #expect(persona.recent[0].text == "the user spoke this")
     }
 
-    func testPurgeLegacyKeysClearsOldDefaults() {
+    @Test func purgeLegacyKeysClearsOldDefaults() {
         let suiteName = "ScribeTests-legacy-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set(true, forKey: "llmEnabled")
@@ -173,10 +226,10 @@ final class PolishCoordinatorTests: XCTestCase {
 
         PolishCoordinator.purgeLegacyKeys(in: defaults)
 
-        XCTAssertNil(defaults.object(forKey: "llmEnabled"))
-        XCTAssertNil(defaults.object(forKey: "llmAPIBaseURL"))
-        XCTAssertNil(defaults.object(forKey: "llmAPIKey"))
-        XCTAssertNil(defaults.object(forKey: "llmModel"))
+        #expect(defaults.object(forKey: "llmEnabled") == nil)
+        #expect(defaults.object(forKey: "llmAPIBaseURL") == nil)
+        #expect(defaults.object(forKey: "llmAPIKey") == nil)
+        #expect(defaults.object(forKey: "llmModel") == nil)
     }
 }
 
