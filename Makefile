@@ -24,7 +24,13 @@ ifneq ($(strip $(ENTITLEMENTS)),)
   CODESIGN_FLAGS += --entitlements "$(ENTITLEMENTS)"
 endif
 
-.PHONY: build clean install run release dmg
+.PHONY: build clean install run release dmg polish-eval install-hooks
+
+polish-eval:
+	swift run -c release PolishEval
+
+install-hooks:
+	./scripts/install-hooks.sh
 
 build:
 	swift build -c release

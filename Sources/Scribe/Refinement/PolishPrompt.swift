@@ -111,6 +111,9 @@ enum PolishPrompt {
         raw:  我刚刚在给他上面提了一个 PR 帮我看一下
         out:  我刚刚在 GitHub 上面提了一个 PR，帮我看一下。
 
+        raw:  把代码 普世 到 给他 上
+        out:  把代码 push 到 GitHub 上。
+
         raw:  我准备早点 给特扒 然后去跑步
         out:  我准备早点 get up 然后去跑步。
 

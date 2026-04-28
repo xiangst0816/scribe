@@ -1,8 +1,7 @@
 import Foundation
 
 /// Local-only public façade so `Tools/PolishEval` can drive the local
-/// polish backend without `@testable import`. Delete this file (and the
-/// `PolishEval` exec target) when prompt evaluation is finished.
+/// polish backend without `@testable import`.
 public enum PolishEvalAPI {
     @MainActor
     public static func runOnce(
@@ -28,6 +27,17 @@ public enum PolishEvalAPI {
     @MainActor
     public static var isReady: Bool {
         Self.shared.isReady
+    }
+
+    /// Mirror of `AppDelegate.applicationWillTerminate`'s shutdown sequence.
+    /// Without this, `exit()` on the eval CLI lets ggml's C++ static
+    /// destructor for the metal-device vector race the still-loaded backend
+    /// and SIGABRTs — same crash family the v0.3.3 `tearDownProcessBackend`
+    /// mechanism was created to prevent.
+    @MainActor
+    public static func tearDown() {
+        Self.shared.releaseContextForShutdown()
+        LlamaContext.tearDownProcessBackend()
     }
 
     @MainActor

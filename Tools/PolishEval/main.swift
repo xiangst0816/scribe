@@ -102,13 +102,26 @@ let cases: [EvalCase] = [
     ),
 ]
 
+/// CLI knobs (env vars so the pre-commit hook can wrap them without parsing args):
+///   POLISH_EVAL_RUNS    — runs per case (default 1; bump to 3 for variance check)
+///   POLISH_EVAL_FILTER  — substring filter on `note`; only matching cases run
+private func envInt(_ key: String, default def: Int) -> Int {
+    guard let s = ProcessInfo.processInfo.environment[key], let v = Int(s), v > 0 else { return def }
+    return v
+}
+
+private func envString(_ key: String) -> String? {
+    let v = ProcessInfo.processInfo.environment[key]
+    return (v?.isEmpty == false) ? v : nil
+}
+
 @MainActor
-func runEval() async {
+func runEval() async -> Int32 {
     print("=== Polish Eval ===")
     print("Loading model …")
     guard PolishEvalAPI.isReady else {
         print("ERROR: model not ready: \(PolishEvalAPI.statusText)")
-        exit(1)
+        return 2
     }
 
     // First call warms up the context. Subsequent calls reuse it.
@@ -116,16 +129,25 @@ func runEval() async {
         _ = try await PolishEvalAPI.runOnce(raw: "测试", languageHint: "Simplified Chinese")
     } catch {
         print("ERROR: warmUp via first call failed: \(error)")
-        exit(1)
+        return 2
     }
     print("Model loaded.\n")
 
-    let runsPerCase = 3
+    let runsPerCase = envInt("POLISH_EVAL_RUNS", default: 1)
+    let filter = envString("POLISH_EVAL_FILTER")
+    let selected = filter.map { f in cases.filter { $0.note.localizedCaseInsensitiveContains(f) } } ?? cases
+    if selected.isEmpty {
+        print("No cases match POLISH_EVAL_FILTER=\"\(filter ?? "")\""); return 0
+    }
+    if let f = filter { print("Filter: \"\(f)\"  (\(selected.count)/\(cases.count) cases)") }
+    print("Runs per case: \(runsPerCase)\n")
+
     var totalPasses = 0
     var totalRuns = 0
+    var failedCases: [String] = []
     var perKindPasses: [EvalCase.Kind: (pass: Int, total: Int)] = [:]
 
-    for (idx, c) in cases.enumerated() {
+    for (idx, c) in selected.enumerated() {
         var caseRuns: [(passed: Bool, output: String)] = []
         for _ in 0..<runsPerCase {
             let out: String
@@ -146,6 +168,11 @@ func runEval() async {
         let passCount = caseRuns.filter { $0.passed }.count
         totalPasses += passCount
         totalRuns += runsPerCase
+        // Strict gating: every run of a case must pass for the case to count
+        // as passed. Any flake = a real concern at temperature 0.25.
+        if passCount < runsPerCase {
+            failedCases.append(c.note)
+        }
         var kindStats = perKindPasses[c.kind] ?? (0, 0)
         kindStats.pass += passCount
         kindStats.total += runsPerCase
@@ -182,10 +209,17 @@ func runEval() async {
     }
     let pct = Double(totalPasses) / Double(totalRuns) * 100
     print(String(format: "  TOTAL: %d/%d (%.0f%%)", totalPasses, totalRuns, pct))
+    if !failedCases.isEmpty {
+        print("\nFailed cases (\(failedCases.count)):")
+        for n in failedCases { print("  ✗ \(n)") }
+        return 1
+    }
+    return 0
 }
 
 Task { @MainActor in
-    await runEval()
-    exit(0)
+    let rc = await runEval()
+    PolishEvalAPI.tearDown()
+    exit(rc)
 }
 RunLoop.main.run()

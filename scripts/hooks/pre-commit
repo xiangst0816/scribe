@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run the polish-prompt eval against the real Gemma 4 E2B
+# GGUF whenever a staged change could affect transcript polishing.
+#
+# Skips silently when nothing relevant is staged so routine commits aren't
+# slowed down. Bypass once with `SKIP_POLISH_EVAL=1 git commit ...` or
+# `git commit --no-verify`.
+#
+# Install with `make install-hooks` (or `scripts/install-hooks.sh`). Not
+# active until installed.
+
+set -euo pipefail
+
+# Files that, when staged, mean the prompt or its execution path could have
+# moved. Any match triggers the eval; everything else skips.
+GUARD_PATTERNS=(
+    "^Sources/Scribe/Refinement/PolishPrompt\.swift$"
+    "^Sources/Scribe/Refinement/PolishEvalAPI\.swift$"
+    "^Sources/Scribe/Refinement/LocalPolishService\.swift$"
+    "^Sources/Scribe/Refinement/LlamaContext\.swift$"
+    "^Tools/PolishEval/"
+)
+
+if [[ "${SKIP_POLISH_EVAL:-0}" == "1" ]]; then
+    echo "polish-eval: SKIP_POLISH_EVAL=1, skipping."
+    exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+need_run=0
+while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    for pat in "${GUARD_PATTERNS[@]}"; do
+        if [[ "$path" =~ $pat ]]; then
+            need_run=1
+            break 2
+        fi
+    done
+done <<< "$staged"
+
+if [[ "$need_run" -eq 0 ]]; then
+    exit 0
+fi
+
+echo "polish-eval: prompt or polish path changed — running eval (≈30–90 s)…"
+echo "             Bypass with  SKIP_POLISH_EVAL=1 git commit  or  --no-verify"
+
+# Try to stream to /dev/tty so output shows up in GUI git clients;
+# silently fall back to stdout when the tty isn't actually usable
+# (some sandboxed harnesses present /dev/tty as "Device not configured").
+{ exec >/dev/tty 2>&1; } 2>/dev/null || true
+swift run -c release PolishEval
