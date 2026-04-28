@@ -8,6 +8,15 @@ or polish without behavioural change.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-28
+
+User-visible: a new advanced sub-toggle under Polish lets the model see what's
+on screen at the moment you press `Fn`, so dictation polishes proper nouns
+and file/identifier names consistently with whatever you're looking at.
+Plus a v0.6.0 regression that misrouted most paste targets to copy-only on
+macOS 26 is fully backed out, and a long-prompt crash inside llama.cpp is
+fixed.
+
 ### Added
 
 - **Screen-context for polish (experimental, off by default).** When polishing
@@ -266,7 +275,8 @@ same way they did in v0.4.3 — they just behave more reliably.
 - Fixed: UTF-8 split issues in Local backend output.
 - Changed: `n_batch` tuned for the Gemma turn wrapper.
 
-[Unreleased]: https://github.com/xiangst0816/scribe/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/xiangst0816/scribe/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/xiangst0816/scribe/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/xiangst0816/scribe/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/xiangst0816/scribe/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/xiangst0816/scribe/compare/v0.4.2...v0.4.3
