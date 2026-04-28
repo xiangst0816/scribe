@@ -20,13 +20,14 @@ A small, focused push-to-talk dictation utility for macOS. Lives in the menu bar
 
 ## Why Scribe
 
-Scribe lives in your menu bar. Press and hold the **Fn** key, speak, release — and the recognized text is pasted directly into whatever text field has focus, in any app. No network round-trip if your Mac supports on-device dictation, no cloud account, no subtitles file you have to copy out of.
+Scribe lives in your menu bar. Press and hold the **Fn** key, speak, release — and the recognized text is pasted directly into whatever text field has focus, in any app. If you happen to release `Fn` with no editable field focused (you're on the desktop, on a play button, etc.), Scribe drops the transcript on your clipboard and shows a brief "Copied to clipboard" notice instead, so the dictation is never silently lost. No network round-trip if your Mac supports on-device dictation, no cloud account, no subtitles file you have to copy out of.
 
 Scribe uses macOS's built-in speech recognizer (`SFSpeechRecognizer`). On Apple Silicon Macs running Sonoma or later, recognition for major languages typically runs on-device; otherwise audio may transit Apple's servers per Apple's Speech Recognition privacy policy.
 
 ## Features
 
 - **Push-to-talk anywhere** — hold `Fn`, speak, release. Works in Safari, VS Code, Slack, Notes, native text fields, web inputs, even Terminal.
+- **Clipboard fallback** — if you release `Fn` with no editable text field focused, Scribe puts the transcript on your clipboard with a brief on-screen notice instead of silently dropping it.
 - **Live transcript pill** — a frosted glass capsule above the audio waveform shows the current sentence as you speak, so you can see what's being heard before you let go.
 - **Trailing buffer** — recording continues for ~500ms after you release `Fn`, so a sentence you're a beat slow finishing doesn't get cut off. Re-pressing `Fn` during the buffer extends the same recording instead of restarting.
 - **Multilingual** — English, 中文 (简体/繁體), 日本語, 한국어. The menu lets you lock a language or follow the system default.
@@ -68,7 +69,7 @@ make clean          # remove build artifacts
 | Action | Result |
 |---|---|
 | Hold `Fn` | Begin recording. A waveform capsule appears at the bottom of the screen, with a transcript pill above it showing what you're saying. |
-| Release `Fn` | A 0.5s trailing buffer captures any final words, then the text is pasted at the cursor. |
+| Release `Fn` | A 0.5s trailing buffer captures any final words, then the text is pasted at the cursor. If no editable text field is focused, the transcript is left on your clipboard with a brief "Copied to clipboard" notice. |
 | Menu bar → **Language** | Lock a language for recognition, or pick System Default to follow the OS. |
 | Menu bar → **Enabled** | Toggle the global `Fn` listener without quitting. |
 
@@ -108,7 +109,8 @@ Scribe.app
 ├── KeyMonitor             ── CGEventTap on .flagsChanged, watches the Fn flag
 ├── AppleSpeechSession     ── SFSpeechRecognizer streaming, with audio-level metering
 ├── OverlayPanel           ── borderless NSPanel with frosted-glass capsule + live transcript pill
-├── TextInjector           ── clipboard-and-⌘V paste, with IME swap dance
+├── TextInjector           ── clipboard-and-⌘V paste, with IME swap dance; copy-only fallback when there's no input target
+├── FocusedFieldDetector   ── AX-based check for an editable focused element; gates the paste-vs-copy decision
 ├── Refinement/            ── optional transcript polishing (off by default)
 │   ├── PolishCoordinator      ── arbitration, 3 s timeout, circuit breaker
 │   ├── SystemPolishService    ── Apple Intelligence (macOS 26+, supported regions)

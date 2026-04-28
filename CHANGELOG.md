@@ -8,6 +8,61 @@ or polish without behavioural change.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-28
+
+User-visible: pick the right microphone when an external one's plugged in,
+fall back to clipboard when there's no text input to paste into, and the
+polish prompt is sturdier against the most common ASR mistranscriptions in
+Chinese dictation.
+
+### Added
+
+- **Microphone selection.** New submenu under the menu bar: Auto, System
+  Default, or any connected input device by name. Auto follows the system
+  default and re-resolves on device hot-plug; System Default locks to whatever
+  the OS currently routes to; explicit selection sticks to that mic by name
+  and falls back to the system default if it disappears. Users on
+  multi-mic setups (laptop + headset, USB array) can now lock dictation to
+  the right input instead of fighting macOS's input routing.
+- **Clipboard fallback when no editable focus.** Releasing `Fn` with focus
+  on a non-text-editable element (desktop, media controls, read-only views)
+  now puts the transcript on the clipboard with a brief "Copied to
+  clipboard" notice on the overlay, instead of a silent no-op or — worse —
+  triggering an unrelated ⌘V shortcut in that app. Uses an AX
+  role/subrole/settable-value classifier; when AX is uncertain (permission
+  revoked mid-session, app doesn't implement AX), it falls through to the
+  historical paste path so quirky-but-pasteable apps aren't punished.
+  Localized notice in en / zh-Hans / zh-Hant / ja / ko.
+
+### Fixed
+
+- **Polish repairs the most common Chinese ASR mistranscriptions of
+  English/technical terms.** Patterns like 给他 → GitHub, 派森 → Python,
+  阿派艾 → API, 瑞德米 → README, 克劳德口德 → Claude Code, 普世 → push,
+  给特扒 → get up, 缘分不动 → 原封不动 are corrected when the literal
+  reading is gibberish in context AND the phonetic match makes the
+  sentence sensible. Conservative when the literal reading is also valid
+  (e.g. 给他打个电话 — pronoun + verb, not GitHub). Verified against the
+  new eval harness; covers the double-mistranscription pattern
+  「普世 到 给他 上」 → 「push 到 GitHub 上」 too.
+
+### Internal
+
+- **`Tools/PolishEval`** — Swift CLI eval harness that exercises the
+  polish prompt against the real Gemma 4 E2B-it Q4_K_M GGUF and gates each
+  case on `mustContain` / `mustNotContain` substrings. 12 cases across
+  REPAIR / KEEP / DISFLUENCY axes; current baseline is 36/36 across three
+  consecutive runs. Configurable via `POLISH_EVAL_RUNS` and
+  `POLISH_EVAL_FILTER` env vars.
+- **Pre-commit hook** at `scripts/hooks/pre-commit` runs the eval before
+  every commit that touches `PolishPrompt.swift`, `PolishEvalAPI.swift`,
+  `LocalPolishService.swift`, `LlamaContext.swift`, or `Tools/PolishEval/`.
+  Skips silently for unrelated commits; bypass with `SKIP_POLISH_EVAL=1`
+  or `git commit --no-verify`. CI doesn't run the eval — it's an
+  executable target, not a `swift test` target — so the harness stays a
+  local-only gate without making CI depend on a 3.5 GB model download.
+  Install with `make install-hooks`.
+
 ## [0.5.0] — 2026-04-28
 
 A reliability + correctness pass on the transcript-polishing pipeline,
@@ -176,7 +231,8 @@ same way they did in v0.4.3 — they just behave more reliably.
 - Fixed: UTF-8 split issues in Local backend output.
 - Changed: `n_batch` tuned for the Gemma turn wrapper.
 
-[Unreleased]: https://github.com/xiangst0816/scribe/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/xiangst0816/scribe/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/xiangst0816/scribe/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/xiangst0816/scribe/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/xiangst0816/scribe/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/xiangst0816/scribe/compare/v0.4.1...v0.4.2
