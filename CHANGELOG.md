@@ -8,6 +8,29 @@ or polish without behavioural change.
 
 ## [Unreleased]
 
+### Added
+
+- **Screen-context for polish (experimental, off by default).** When polishing
+  is enabled, an opt-in sub-toggle has Scribe take one screenshot of the
+  focused window at `Fn`-down, run Apple's Vision text recognizer on it
+  locally, and feed the recognized text to the polish prompt as a "what the
+  user is looking at" hint. Helps the model spell proper nouns, file names,
+  and identifiers visible on screen consistently. Requires Screen Recording
+  permission. Vision runs entirely on-device — pixels never leave the Mac;
+  the image is processed in memory only and discarded after recognition.
+  Per-capture activity (window size, OCR duration, full recognized text)
+  is logged to `~/Library/Logs/Scribe.log` under the `screen-context:` tag
+  for verification. Localized in en/zh-Hans/zh-Hant/ja/ko.
+
+### Fixed
+
+- **`llama_decode` no longer crashes on long prompts.** `cparams.n_batch`
+  was hard-coded to 2048, which the new screen-context layer could overrun
+  whenever the captured text pushed the total prompt past ~2 K tokens —
+  GGML aborted with `n_tokens_all <= cparams.n_batch` and SIGABRT'd the
+  llama dispatch queue. `n_batch` now matches `n_ctx` (4096); the cost is
+  a one-time scratch buffer of a few MB.
+
 ### Reverted
 
 - **Clipboard fallback when no editable focus** (introduced in v0.6.0).

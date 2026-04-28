@@ -111,9 +111,12 @@ final class LlamaContext {
             // is ~700–900 tokens on the long side (similar to the old Qwen
             // ChatML build); n_batch must fit the whole prompt-decode pass
             // in one shot or llama_decode aborts with
-            // "n_tokens_all <= cparams.n_batch". 2048 leaves headroom for
-            // future prompt growth without paying for the full 4096 ctx.
-            cparams.n_batch = 2048
+            // "n_tokens_all <= cparams.n_batch". The screen-context layer
+            // (Phase 5.3) can push the total prompt into the 2-3K-token
+            // range, so n_batch is sized to match n_ctx — a few extra MB of
+            // scratch buffer is the right trade for not crashing the polish
+            // pipeline whenever a long screen capture lands in the prompt.
+            cparams.n_batch = nCtx
             guard let c = llama_init_from_model(m, cparams) else {
                 llama_model_free(m)
                 self.model = nil
