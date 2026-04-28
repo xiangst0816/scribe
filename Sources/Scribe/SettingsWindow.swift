@@ -38,6 +38,7 @@ final class SettingsWindow: NSPanel {
         return s
     }()
     private let openFolderButton = NSButton()
+    private let resetAdaptiveButton = NSButton()
 
     private var observer: NSObjectProtocol?
     private var personaSaveTimer: Timer?
@@ -203,12 +204,21 @@ final class SettingsWindow: NSPanel {
         openFolderButton.target = self
         openFolderButton.action = #selector(openScribeFolder)
 
+        resetAdaptiveButton.title = L10n.t("settings.polish.adaptive.reset")
+        resetAdaptiveButton.bezelStyle = .rounded
+        resetAdaptiveButton.target = self
+        resetAdaptiveButton.action = #selector(resetAdaptiveData)
+
+        let adaptiveButtonRow = NSStackView(views: [openFolderButton, resetAdaptiveButton])
+        adaptiveButtonRow.orientation = .horizontal
+        adaptiveButtonRow.spacing = 8
+
         let adaptiveBlock = NSStackView(views: [
             adaptiveCheckbox,
             adaptiveDetailLabel,
             personaLabel,
             personaScrollView,
-            openFolderButton,
+            adaptiveButtonRow,
         ])
         adaptiveBlock.orientation = .vertical
         adaptiveBlock.alignment = .leading
@@ -262,12 +272,13 @@ final class SettingsWindow: NSPanel {
         enableCheckbox.state = coordinator.isEnabled ? .on : .off
         adaptiveCheckbox.state = coordinator.isAdaptiveEnabled ? .on : .off
 
-        // Persona textbox + Open Folder are only meaningful when adaptive is
-        // on. Disable rather than hide so the layout doesn't jump.
+        // Persona textbox + folder/reset buttons are only meaningful when
+        // adaptive is on. Disable rather than hide so the layout doesn't jump.
         let adaptiveOn = coordinator.isAdaptiveEnabled
         personaTextView.isEditable = adaptiveOn
         applyPersonaTextColor()
         openFolderButton.isEnabled = adaptiveOn
+        resetAdaptiveButton.isEnabled = adaptiveOn
         personaLabel.textColor = adaptiveOn ? .secondaryLabelColor : .tertiaryLabelColor
 
         // Status under each radio — reflects backend.statusText verbatim.
@@ -396,6 +407,30 @@ final class SettingsWindow: NSPanel {
         NSWorkspace.shared.activateFileViewerSelecting([ModelLocation.supportDirectory])
     }
 
+    @objc private func resetAdaptiveData() {
+        // Confirm before destroying — the persona is hand-written by the user
+        // and the recent history is the only source of truth. Open-folder is
+        // also available for users who want to inspect first.
+        let alert = NSAlert()
+        alert.messageText = L10n.t("settings.polish.adaptive.resetConfirm.title")
+        alert.informativeText = L10n.t("settings.polish.adaptive.resetConfirm.body")
+        alert.alertStyle = .warning
+        let confirmButton = alert.addButton(
+            withTitle: L10n.t("settings.polish.adaptive.resetConfirm.confirm")
+        )
+        // The destructive button needs to be visually distinct; the default
+        // button (the rightmost / Return-key one) should be Cancel here.
+        confirmButton.hasDestructiveAction = true
+        alert.addButton(withTitle: L10n.t("settings.polish.adaptive.resetConfirm.cancel"))
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        coordinator.personaStore.purgeAll()
+        personaTextView.string = ""
+        applyPersonaTextColor()
+    }
+
     @objc private func closeWindow() {
         close()
     }
@@ -406,14 +441,22 @@ final class SettingsWindow: NSPanel {
 extension SettingsWindow: NSTextViewDelegate {
     /// Persist the persona on every edit, debounced 500 ms so we don't hit the
     /// disk on every keystroke. Hard cap is enforced by PersonaStore.
+    ///
+    /// Registered for `.common` modes so the timer still fires when the run
+    /// loop is in `eventTracking` / `modalPanel` (e.g. an NSAlert pops while
+    /// the user is mid-edit). With the default-only registration the
+    /// 500 ms tick gets delayed across modal mode and a Cmd-Q from inside
+    /// the alert would drop the most recent edit (G12).
     func textDidChange(_ notification: Notification) {
         personaSaveTimer?.invalidate()
         let snapshot = personaTextView.string
-        personaSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.5, repeats: false) { [weak self] _ in
             guard let self else { return }
             MainActor.assumeIsolated {
                 _ = self.coordinator.personaStore.setPersona(snapshot)
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        personaSaveTimer = timer
     }
 }

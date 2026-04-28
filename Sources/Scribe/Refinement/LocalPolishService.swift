@@ -33,29 +33,65 @@ final class LocalPolishService: PolishService {
 
     private let descriptor: ModelDescriptor = .gemma4_E2B_it_Q4_K_M
     private let downloader = ModelDownloader.shared
+    private let modelIsPresent: () -> Bool
     private var context: LlamaContext?
     private var contextWarmedUp: Bool = false
 
-    init() {
+    /// Production init. The disk check is injectable so `LocalPolishServiceTests`
+    /// can verify `refreshAvailability` preserves sticky failure state without
+    /// depending on whether the user's `~/Library/Application Support/Scribe/`
+    /// happens to hold a real model file.
+    init(modelIsPresent: @escaping () -> Bool = { ModelLocation.modelIsPresent() }) {
+        self.modelIsPresent = modelIsPresent
         wireDownloader()
         refreshAvailability()
     }
 
-    /// Re-check the model file on disk + reset stale context. Cheap.
+    /// Re-check the model file on disk + reset stale context. Cheap; called
+    /// at startup, on `applicationDidBecomeActive`, and after every downloader
+    /// state change.
+    ///
+    /// **Failure-state preservation** (R3): an `applicationDidBecomeActive`
+    /// hop is incidental — it shouldn't erase the user-visible reason the
+    /// backend is unavailable. So `.downloadFailed` and `.loadFailed` are
+    /// sticky here: only an explicit user action (purge, which routes
+    /// through `applyDownloaderState(.cancelled)` and resets to
+    /// `.notDownloaded`; or a fresh download attempt, which transitions
+    /// straight to `.downloading`) clears them. Without this, a user who
+    /// saw `Download failed: 网络不可达` could switch to System Settings,
+    /// switch back, and find the status silently reset to `Not downloaded`
+    /// with no indication of why retrying made sense.
+    ///
+    /// Note: `.loadFailed` happens *with* the file still on disk (warmUp
+    /// failed to mmap it), so we can't promote it to `.ready` just because
+    /// the file is present — that's the whole point of the failure.
     func refreshAvailability() {
-        if ModelLocation.modelIsPresent() {
-            downloadState = .ready
-        } else if case .downloading = downloadState {
-            // Already downloading; don't clobber.
-        } else if case .verifying = downloadState {
-            // mid-verify
-        } else {
-            downloadState = .notDownloaded
-            // The file we cached against might be gone — drop the context.
-            context = nil
-            contextWarmedUp = false
+        switch downloadState {
+        case .downloading, .verifying, .downloadFailed, .loadFailed:
+            // In-flight or sticky failure — preserved across refresh.
+            break
+        case .notDownloaded:
+            if modelIsPresent() {
+                downloadState = .ready
+            }
+        case .ready:
+            if !modelIsPresent() {
+                // File disappeared (user deleted it from Finder, disk
+                // unmount, etc.) — demote and drop the cached context.
+                downloadState = .notDownloaded
+                context = nil
+                contextWarmedUp = false
+            }
         }
         NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
+    }
+
+    /// Test-only seam — production code should never call this. Lets
+    /// `LocalPolishServiceTests` plant a state and verify `refreshAvailability`
+    /// honours the R3 preservation contract. Underscore-prefixed by
+    /// convention (matches `PolishCoordinator.injectStubService`).
+    func _setDownloadStateForTesting(_ state: DownloadState) {
+        self.downloadState = state
     }
 
     /// User clicked Download (or Retry). Idempotent.
@@ -82,11 +118,28 @@ final class LocalPolishService: PolishService {
         refreshAvailability()
     }
 
-    /// Release the in-memory llama context (synchronously, via `deinit`) so
-    /// `llama_free` / `llama_model_free` happen before the process tears down
-    /// its global state. Called from `AppDelegate.applicationWillTerminate`.
-    /// Does NOT touch the on-disk model file.
+    /// Drain the inference queue, then release the in-memory llama context
+    /// so `llama_free` / `llama_model_free` happen before the process tears
+    /// down its global ggml state. Called from
+    /// `AppDelegate.applicationWillTerminate`. Does NOT touch the on-disk
+    /// model file.
+    ///
+    /// Ordering matters: the immediately-following call site
+    /// (`LlamaContext.tearDownProcessBackend()` in
+    /// `applicationWillTerminate`) frees ggml's process-wide backend, which
+    /// is unsafe while inference is still mid-`llama_decode`. The drain
+    /// blocks main until the queue is idle, so post-return there's no
+    /// in-flight work using the backend.
+    ///
+    /// Note: just nilling `context` from main wasn't enough on its own,
+    /// because the queue's `run` closure captures `[self]` (the
+    /// `LlamaContext`) strongly — the `deinit` only runs after the queue
+    /// drains naturally. Without the explicit drain, an in-flight polish
+    /// at Cmd-Q would race `llama_backend_free()` against an active
+    /// `llama_decode()`. Same family of crash that the v0.3.3
+    /// `tearDownProcessBackend` mechanism was meant to prevent.
     func releaseContextForShutdown() {
+        context?.cancelAndDrain()
         context = nil
         contextWarmedUp = false
     }

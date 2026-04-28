@@ -364,6 +364,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Update the "Polish: <state>" menu item based on coordinator state.
+    ///
+    /// Branch order is load-bearing (R4):
+    ///   breaker > master-off > timeout-warning > ready > hard-skip > unavailable
+    /// Specifically, `lastCallTimedOut` MUST be checked before `active()` —
+    /// timeouts don't trip the breaker, so the backend stays ready, so the
+    /// `ready` branch would otherwise shadow the timeout signal forever and
+    /// the user would never learn polish was silently falling back to raw.
     private func refreshPolishMenuItem() {
         guard let item = polishStatusMenuItem else { return }
         let key: String
@@ -371,6 +378,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             key = "menu.polish.breakerTripped"
         } else if !polishCoordinator.isEnabled {
             key = "menu.polish.off"
+        } else if polishCoordinator.lastCallTimedOut {
+            key = "menu.polish.skippedTimeout"
         } else if let svc = polishCoordinator.active() {
             key = svc.backend == .system ? "menu.polish.readySystem" : "menu.polish.readyLocal"
         } else if lastPolishWasSkipped {

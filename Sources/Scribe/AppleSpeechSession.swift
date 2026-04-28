@@ -1,4 +1,5 @@
 import AVFoundation
+import os
 import Speech
 
 /// One speech recognition attempt. Construct, configure callbacks, then `start()`.
@@ -36,6 +37,16 @@ final class AppleSpeechSession {
     private var state: State = .idle
     private var lastPartial = ""
     private var fallbackTimer: Timer?
+
+    /// Last main-actor audio-level hop. The audio tap fires at the input
+    /// device's natural rate (~100+ Hz on most devices); the waveform UI
+    /// only needs ~30 Hz to look smooth. Throttling here keeps the dispatch
+    /// cost (closure alloc + main-queue hop) bounded regardless of input rate.
+    /// Read+written from the audio tap thread; `OSAllocatedUnfairLock`
+    /// guards it without bringing in the dispatch overhead a serial queue
+    /// would add.
+    private let lastAudioEmitNanos = OSAllocatedUnfairLock<UInt64>(initialState: 0)
+    private static let audioEmitMinIntervalNanos: UInt64 = 33_000_000  // ~30 Hz
 
     /// Time after `stop()` to wait for a final result before delivering whatever
     /// partial text we have. SFSpeechRecognizer occasionally never delivers
@@ -191,6 +202,21 @@ final class AppleSpeechSession {
     }
 
     private func emitAudioLevel(_ buffer: AVAudioPCMBuffer) {
+        // Throttle gate first — RMS calc is cheap but the main-queue hop
+        // and onAudioLevel closure aren't, and the audio tap fires at the
+        // device's natural rate (typically 100+ Hz). UI only redraws at
+        // ~60 fps and the smoothing in WaveformView keeps it visually
+        // continuous from a 30 Hz input.
+        let now = DispatchTime.now().uptimeNanoseconds
+        let shouldEmit = lastAudioEmitNanos.withLock { last in
+            if now - last >= Self.audioEmitMinIntervalNanos {
+                last = now
+                return true
+            }
+            return false
+        }
+        guard shouldEmit else { return }
+
         guard let channelData = buffer.floatChannelData?[0] else { return }
         let frameLength = Int(buffer.frameLength)
         var sum: Float = 0

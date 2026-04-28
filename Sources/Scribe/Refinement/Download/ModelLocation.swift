@@ -17,8 +17,16 @@ enum ModelLocation {
     /// disk so a user who rolls back doesn't have to re-download.
     static let modelFileName = "gemma-4-E2B-it-Q4_K_M.gguf"
 
+    /// Test-only override, set by `ModelDownloaderTests` so the test runs
+    /// against a temp directory instead of the user's real
+    /// `~/Library/Application Support/Scribe/`. Production code never
+    /// touches this — the default path resolution wins when the override
+    /// is `nil`. Underscore-prefixed by convention.
+    nonisolated(unsafe) static var _supportDirectoryOverrideForTesting: URL?
+
     /// `~/Library/Application Support/Scribe/`
     static var supportDirectory: URL {
+        if let override = _supportDirectoryOverrideForTesting { return override }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
         return base.appendingPathComponent("Scribe", isDirectory: true)

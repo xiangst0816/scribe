@@ -101,6 +101,21 @@ final class PolishCoordinator {
     /// Set when the breaker has tripped, until the user re-enables polish.
     private(set) var isBreakerTripped: Bool = false
 
+    /// **Tracked separately from `consecutiveFailures`** (R4): timeouts are
+    /// performance signals, not engine-broke signals — they don't trip the
+    /// breaker, because slow Apple Silicon would otherwise auto-disable
+    /// polish mid-session every time the model happens to clip the budget.
+    /// But the user still needs to know polish silently fell back to raw,
+    /// so the menu surfaces the most recent timeout via this flag (cleared
+    /// on the next successful polish). See `AppDelegate.refreshPolishMenuItem`
+    /// for the menu-bar wiring; the `lastCallTimedOut` branch must be
+    /// checked **before** the `active()` ready branch — otherwise as long
+    /// as the backend is still ready (it always is after a timeout, since
+    /// timeouts don't trip the breaker), the ready label shadows this and
+    /// the timeout signal never reaches the user.
+    private(set) var consecutiveTimeouts: Int = 0
+    private(set) var lastCallTimedOut: Bool = false
+
     /// Fired when consecutive failures hit `breakerThreshold` — UI / status bar
     /// should react (notify the user, flip the master toggle off).
     var onBreakerTripped: ((String) -> Void)?
@@ -233,6 +248,7 @@ final class PolishCoordinator {
             // happens to clip the budget. Real failures (load error, bad
             // output) still trip the breaker via the catch-all below.
             NSLog("Scribe polish timeout (>%.1fs); pasting raw", Self.timeoutSeconds)
+            recordTimeout()
             final = raw
         } catch {
             recordFailure(error.localizedDescription)
@@ -265,16 +281,32 @@ final class PolishCoordinator {
     private func recordSuccess() {
         consecutiveFailures = 0
         lastFailureMessage = nil
+        // Cleared on every success: a single OK polish is enough to drop
+        // the menu out of the "Skipped (timed out)" state. If the next call
+        // also times out, it'll re-arm.
+        consecutiveTimeouts = 0
+        lastCallTimedOut = false
     }
 
     private func recordFailure(_ message: String) {
         consecutiveFailures += 1
         lastFailureMessage = message
+        // A hard failure also resolves the timeout signal — `lastCallTimedOut`
+        // is "the *most recent* call timed out", so a subsequent failure
+        // takes precedence in the menu (failure → ".skipped"; failure on the
+        // 3rd consecutive call trips the breaker, which dominates).
+        lastCallTimedOut = false
         NSLog("Scribe polish failure (%d/%d): %@",
               consecutiveFailures, Self.breakerThreshold, message)
         if consecutiveFailures >= Self.breakerThreshold {
             tripBreaker(message)
         }
+        NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
+    }
+
+    private func recordTimeout() {
+        consecutiveTimeouts += 1
+        lastCallTimedOut = true
         NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
     }
 
@@ -287,6 +319,8 @@ final class PolishCoordinator {
     func resetCircuitBreaker() {
         consecutiveFailures = 0
         lastFailureMessage = nil
+        consecutiveTimeouts = 0
+        lastCallTimedOut = false
         isBreakerTripped = false
     }
 

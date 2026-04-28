@@ -6,9 +6,16 @@ import llama
 ///
 /// Threading: the wrapper is intentionally **not** `@MainActor`. Inference is
 /// CPU-/GPU-bound for hundreds of milliseconds; we serialise it onto a private
-/// dispatch queue so it can't block the main thread while the user is mid-paste.
-/// All public methods are safe to call from any actor; results come back on
-/// the caller's actor via `async`.
+/// dispatch queue (see `CancellableInferenceQueue`) so it can't block the main
+/// thread while the user is mid-paste. All public methods are safe to call
+/// from any actor; results come back on the caller's actor via `async`.
+///
+/// Cancellation flows through `CancellableInferenceQueue.Token`: external
+/// `Task.cancel()` (e.g. from `withTimeout`) flips the token, and the
+/// generation loop polls it once per token so cancel latency is bounded by
+/// one decode step rather than `maxNewTokens`. See the type-level comment
+/// on `CancellableInferenceQueue` for why a flag-based primitive is needed
+/// here instead of `Task.checkCancellation()`.
 final class LlamaContext {
     enum Error: LocalizedError {
         case modelLoadFailed(String)
@@ -39,7 +46,7 @@ final class LlamaContext {
     }
 
     private let modelPath: String
-    private let queue: DispatchQueue
+    private let inferenceQueue = CancellableInferenceQueue(label: "com.yetone.Scribe.llama")
     private var model: OpaquePointer?
     private var ctx: OpaquePointer?
     private var vocab: OpaquePointer?
@@ -77,7 +84,6 @@ final class LlamaContext {
     init(modelPath: String) {
         _ = LlamaContext.backendOnce
         self.modelPath = modelPath
-        self.queue = DispatchQueue(label: "com.yetone.Scribe.llama", qos: .userInitiated)
     }
 
     deinit {
@@ -87,9 +93,10 @@ final class LlamaContext {
 
     /// Load model + context into memory. Synchronously runs on the inference
     /// queue; first call typically takes 1–3 s on M2 for Gemma 4 E2B (~3.46 GB
-    /// mmap). Subsequent calls are no-ops.
+    /// mmap). Subsequent calls are no-ops. Model load itself isn't
+    /// interruptible (mmap-bound), so the token is unused here.
     func warmUp() async throws {
-        try await onQueue { [self] in
+        try await inferenceQueue.run { [self] _ in
             guard model == nil else { return }
             let mparams = llama_model_default_params()
             guard let m = llama_model_load_from_file(modelPath, mparams) else {
@@ -123,13 +130,21 @@ final class LlamaContext {
     /// `prompt` is the fully-templated text including chat-format wrappers.
     /// The caller (PolishPrompt) owns formatting decisions.
     func generate(prompt: String, params: SamplingParams = .init()) async throws -> String {
-        try await onQueue { [self] in
+        try await inferenceQueue.run { [self] token in
             try ensureLoaded()
-            return try generateSync(prompt: prompt, params: params)
+            return try generateSync(prompt: prompt, params: params, token: token)
         }
     }
 
-    // MARK: - Private (always runs on `queue`)
+    /// Set the cancel flag and synchronously wait until any in-flight
+    /// inference has unwound. Use before tearing down ggml's process-wide
+    /// state in `applicationWillTerminate` — see
+    /// `LocalPolishService.releaseContextForShutdown`. Idempotent.
+    func cancelAndDrain() {
+        inferenceQueue.cancelAndDrain()
+    }
+
+    // MARK: - Private (always runs on the inference queue)
 
     private func ensureLoaded() throws {
         guard model != nil else {
@@ -139,7 +154,11 @@ final class LlamaContext {
         }
     }
 
-    private func generateSync(prompt: String, params: SamplingParams) throws -> String {
+    private func generateSync(
+        prompt: String,
+        params: SamplingParams,
+        token: CancellableInferenceQueue.Token
+    ) throws -> String {
         guard let ctx, let vocab else { throw Error.contextInitFailed }
 
         // Reset KV cache so each polish call is independent (no carryover
@@ -204,9 +223,12 @@ final class LlamaContext {
 
         while nGenerated < params.maxNewTokens {
             // Cooperative cancellation — coordinator's withTimeout cancels the
-            // outer Task; the queue hop in `onQueue` checks `Task.isCancelled`.
-            // We also check inside the generation loop so we stop ASAP.
-            try Task.checkCancellation()
+            // outer Task; `withTaskCancellationHandler` flips the queue's
+            // cancel flag; this poll throws `CancelledError` (which the C-
+            // resource-cleanup `defer { llama_sampler_free(sampler) }` above
+            // unwinds), `cont.resume(throwing:)` fires, and the awaiting
+            // task group unblocks within one decode step of the cancel.
+            try token.checkCancelled()
 
             var nextTok = llama_sampler_sample(sampler, ctx, -1)
             if llama_vocab_is_eog(vocab, nextTok) { break }
@@ -234,26 +256,5 @@ final class LlamaContext {
         // crash; in practice the model outputs valid UTF-8 once the full
         // token stream is in hand.
         return String(decoding: byteAccumulator, as: UTF8.self)
-    }
-
-    /// Run a closure on the inference queue and bridge the result back to the
-    /// caller's actor. Honours task cancellation by failing fast before the
-    /// hop and after the work returns.
-    private func onQueue<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
-        try Task.checkCancellation()
-        return try await withCheckedThrowingContinuation { cont in
-            queue.async {
-                if Task.isCancelled {
-                    cont.resume(throwing: Error.generationCancelled)
-                    return
-                }
-                do {
-                    let value = try work()
-                    cont.resume(returning: value)
-                } catch {
-                    cont.resume(throwing: error)
-                }
-            }
-        }
     }
 }
