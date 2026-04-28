@@ -8,6 +8,18 @@ or polish without behavioural change.
 
 ## [Unreleased]
 
+### Reverted
+
+- **Clipboard fallback when no editable focus** (introduced in v0.6.0).
+  The AX-based `FocusedFieldDetector` misclassified Chromium-based content
+  (VS Code editor surface, Chrome web inputs) as non-editable on macOS 26 —
+  most paste targets ended up routed to copy-only by mistake, while the
+  same code path worked on macOS 15. Reverted to the historical
+  unconditional paste flow until a more reliable detection strategy is in
+  place. Removed: `FocusedFieldDetector`, `TextInjector.copyOnly`,
+  `OverlayPanel.showCopiedNotice`, and the `overlay.copiedToClipboard`
+  localized strings.
+
 ## [0.6.0] — 2026-04-28
 
 User-visible: pick the right microphone when an external one's plugged in,

@@ -4,11 +4,6 @@ import Carbon
 final class TextInjector {
     /// Place `text` on the clipboard and synthesize ⌘V into the focused
     /// app, restoring the previous clipboard contents shortly after.
-    ///
-    /// Used when AX confirms there's a text input target. If the focused
-    /// element can't accept text, callers should use `copyOnly(_:)` instead
-    /// — pasting into a non-input target either does nothing or, worse,
-    /// triggers an unrelated ⌘V shortcut in that app.
     func paste(_ text: String) {
         guard !text.isEmpty else { return }
 
@@ -59,17 +54,6 @@ final class TextInjector {
                 pasteboard.setString(saved, forType: .string)
             }
         }
-    }
-
-    /// Place `text` on the clipboard and leave it there. Used when there's
-    /// no focused text input — the user will paste manually wherever they
-    /// land next, so we deliberately *don't* save and restore the previous
-    /// clipboard, and we don't synthesize a paste keystroke.
-    func copyOnly(_ text: String) {
-        guard !text.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
     }
 
     // MARK: - Input Source Helpers

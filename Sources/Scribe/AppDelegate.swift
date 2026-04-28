@@ -244,22 +244,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 self.cleanupAfterPolish()
                 return
             }
-            // Branch on whether there's somewhere to paste. If AX can't tell
-            // (permission flapped, app doesn't implement focus), the detector
-            // returns true and we keep the historical paste-and-restore flow.
-            if FocusedFieldDetector.hasEditableTextFocus() {
-                self.textInjector.paste(polished)
-                NSSound(named: .init("Pop"))?.play()
-                self.cleanupAfterPolish(dismissOverlay: true)
-            } else {
-                self.textInjector.copyOnly(polished)
-                NSSound(named: .init("Tink"))?.play()
-                self.overlayPanel.showCopiedNotice(L10n.t("overlay.copiedToClipboard"))
-                // Don't dismiss the overlay here — showCopiedNotice owns the
-                // 1.5s hold and will fade itself out. Cleaning up state
-                // immediately means the user can press Fn again right away.
-                self.cleanupAfterPolish(dismissOverlay: false)
-            }
+            self.textInjector.paste(polished)
+            NSSound(named: .init("Pop"))?.play()
+            self.cleanupAfterPolish(dismissOverlay: true)
         }
     }
 

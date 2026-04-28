@@ -6,10 +6,7 @@ final class OverlayPanel: NSPanel {
     private let spinnerView = SpinnerView()
     private let transcriptLabel = NSTextField(labelWithString: "")
     private let transcriptBackground = NSVisualEffectView()
-
-    /// Pending "copied to clipboard" auto-dismiss. Held so a new recording
-    /// or a manual dismiss can cancel the trailing fade-out.
-    private var copiedNoticeWork: DispatchWorkItem?
+    private let capsuleHost = NSView()
 
     private let capsuleHeight: CGFloat = 34
     private let capsuleWidth: CGFloat = 78
@@ -57,7 +54,6 @@ final class OverlayPanel: NSPanel {
 
     private func buildCapsule(in cv: NSView) {
         // Bottom-anchored capsule, horizontally centered.
-        let capsuleHost = NSView()
         capsuleHost.translatesAutoresizingMaskIntoConstraints = false
         capsuleHost.wantsLayer = true
         capsuleHost.layer?.shadowColor = NSColor.black.withAlphaComponent(0.35).cgColor
@@ -165,11 +161,7 @@ final class OverlayPanel: NSPanel {
     // MARK: - Public
 
     func show() {
-        // A new recording cancels any pending "copied to clipboard" auto-fade
-        // — otherwise the next session's pill could blink off mid-display.
-        copiedNoticeWork?.cancel()
-        copiedNoticeWork = nil
-
+        capsuleHost.isHidden = false
         waveformView.isHidden = false
         spinnerView.isHidden = true
         spinnerView.stop()
@@ -228,8 +220,6 @@ final class OverlayPanel: NSPanel {
     }
 
     func dismiss() {
-        copiedNoticeWork?.cancel()
-        copiedNoticeWork = nil
         waveformView.isAnimating = false
         spinnerView.stop()
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -240,26 +230,6 @@ final class OverlayPanel: NSPanel {
             self.orderOut(nil)
             self.setTranscript("")
         })
-    }
-
-    /// Replace the post-recording UI with a brief "copied to clipboard"
-    /// notice on the transcript pill, then fade the overlay out after
-    /// `holdSeconds`. Used when there's no focused text input to paste
-    /// into — the user needs to know the dictation produced something
-    /// even though nothing was typed for them.
-    func showCopiedNotice(_ text: String, holdSeconds: TimeInterval = 1.5) {
-        waveformView.isAnimating = false
-        waveformView.isHidden = true
-        spinnerView.stop()
-        spinnerView.isHidden = true
-        setTranscript(text)
-
-        copiedNoticeWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.dismiss()
-        }
-        copiedNoticeWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + holdSeconds, execute: work)
     }
 
     // MARK: - Sentence extraction
