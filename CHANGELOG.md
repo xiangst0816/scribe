@@ -8,6 +8,23 @@ or polish without behavioural change.
 
 ## [Unreleased]
 
+### Removed
+
+- **Screen-context for polish** (introduced in v0.7.0). In practice the
+  Vision OCR output didn't measurably improve polish quality — proper
+  nouns the model needed help with were rarely present in the captured
+  screen text, and when they were, the model often didn't fold them in.
+  Net effect: a 200 ms delay on the polish path, a Screen Recording
+  permission ask, and a chunk of system-prompt tokens, for no win.
+  Removed: `ScreenContextCapture`, `OCRContextSource`, the
+  `polish.screenContext.enabled` UserDefaults key, the Settings checkbox
+  + localized strings (5 langs), the `screenContext` parameter on
+  `PolishCoordinator.maybePolish` / `PolishPrompt.assemble`, and the
+  awaitScreenContext / screenContextTask machinery in AppDelegate. The
+  unrelated `n_batch=n_ctx` bump in [LlamaContext.swift](Sources/Scribe/Refinement/LlamaContext.swift)
+  stays — it's still the right configuration even without long screen
+  contexts pushing the prompt.
+
 ## [0.7.0] — 2026-04-28
 
 User-visible: a new advanced sub-toggle under Polish lets the model see what's

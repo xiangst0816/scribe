@@ -42,18 +42,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// top of an in-flight one, and so `resetSession` can cancel cleanly.
     private var polishTask: Task<Void, Never>?
 
-    /// AX-tree snapshot kicked off on Fn-down when the screen-context feature
-    /// is enabled. The polish step awaits this with a small deadline before
-    /// it calls the LLM — if AX hasn't returned by then we cancel and proceed
-    /// without context. Logged to ~/Library/Logs/Scribe.log.
-    private var screenContextTask: Task<String?, Never>?
-
-    /// Maximum wall-clock budget for the screen-context capture, measured from
-    /// the moment polish *wants* to start. The capture has had the entire
-    /// recording duration to run already, so 200ms here just guards against a
-    /// hung cross-process AX call that would otherwise block paste.
-    private static let screenContextDeadlineSeconds: TimeInterval = 0.2
-
     /// Trailing audio captured after FN release. Users often let go a beat
     /// before they finish their sentence; this preserves those last words.
     private static let trailingBufferSeconds: TimeInterval = 0.5
@@ -180,19 +168,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         overlayPanel.show()
         NSSound(named: .init("Tink"))?.play()
         session.start()
-
-        // Snapshot the focused window's content in parallel with the
-        // recording. Gated on the master polish toggle + the screen-context
-        // sub-toggle so users on the bare-paste path don't pay capture cost
-        // they'll never use.
-        if polishCoordinator.isEnabled, polishCoordinator.isScreenContextEnabled {
-            screenContextTask?.cancel()
-            screenContextTask = Task.detached(priority: .userInitiated) {
-                await ScreenContextCapture.capture()
-            }
-        } else {
-            screenContextTask = nil
-        }
     }
 
     private func fnUp() {
@@ -222,14 +197,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             updateStatusIcon()
             deliverFinal(text)
         case .cancelled:
-            screenContextTask?.cancel()
-            screenContextTask = nil
             sessionState = .idle
             updateStatusIcon()
             overlayPanel.dismiss()
         case .error(let message):
-            screenContextTask?.cancel()
-            screenContextTask = nil
             sessionState = .idle
             updateStatusIcon()
             NSLog("Scribe speech error: %@", message)
@@ -253,11 +224,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         polishTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let beforeFailures = self.polishCoordinator.consecutiveFailures
-            let screenContext = await self.awaitScreenContext()
             let polished = await self.polishCoordinator.maybePolish(
                 trimmed,
-                selectedLocaleCode: self.selectedLocaleCode,
-                screenContext: screenContext
+                selectedLocaleCode: self.selectedLocaleCode
             )
             self.lastPolishWasSkipped = (self.polishCoordinator.consecutiveFailures > beforeFailures)
             self.refreshPolishMenuItem()
@@ -288,45 +257,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// "copied to clipboard" notice). Idempotent so repeated calls are safe.
     private func cleanupAfterPolish(dismissOverlay: Bool = true) {
         polishTask = nil
-        screenContextTask?.cancel()
-        screenContextTask = nil
         if dismissOverlay {
             overlayPanel.dismiss()
         }
         sessionState = .idle
         updateStatusIcon()
-    }
-
-    /// Wait for the AX-tree snapshot kicked off in `fnDown`, but no longer
-    /// than `screenContextDeadlineSeconds`. If the deadline fires first the
-    /// task is cancelled (Task.isCancelled inside ScreenContextCapture's
-    /// traversal terminates the walk) and polish proceeds without context.
-    /// Each branch logs to ~/Library/Logs/Scribe.log so the user can tell
-    /// "AX returned nothing" from "AX timed out" from "feature was off".
-    private func awaitScreenContext() async -> String? {
-        guard let task = screenContextTask else {
-            ScreenContextCapture.log("await — feature off, no task")
-            return nil
-        }
-        let deadlineNs = UInt64(Self.screenContextDeadlineSeconds * 1_000_000_000)
-        let result: String? = await withTaskGroup(of: String?.self) { group in
-            group.addTask { await task.value }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: deadlineNs)
-                return nil
-            }
-            let first = await group.next()
-            group.cancelAll()
-            return first ?? nil
-        }
-        if result == nil {
-            // Either capture returned nil (logged inside captureSync) or the
-            // deadline fired. Cancel so a still-running traversal stops on
-            // its next Task.isCancelled check.
-            task.cancel()
-            ScreenContextCapture.log("await — deadline reached or empty result, polish proceeds without context")
-        }
-        return result
     }
 
     private func resetSession() {

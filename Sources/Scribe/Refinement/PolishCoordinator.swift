@@ -36,11 +36,10 @@ final class PolishCoordinator {
 
     // MARK: - Persistence
 
-    private static let kEnabled       = "polish.enabled"
-    private static let kBackend       = "polish.backend"
-    private static let kMirror        = "polish.local.mirror"
-    private static let kAdaptive      = "polish.adaptive.enabled"
-    private static let kScreenContext = "polish.screenContext.enabled"
+    private static let kEnabled  = "polish.enabled"
+    private static let kBackend  = "polish.backend"
+    private static let kMirror   = "polish.local.mirror"
+    private static let kAdaptive = "polish.adaptive.enabled"
 
     /// Adaptive (Phase 5.1): when on, the assembled system prompt includes
     /// L2 (persona) + L3 (recent finished writing) on every polish call, and
@@ -50,21 +49,6 @@ final class PolishCoordinator {
         get { defaults.bool(forKey: Self.kAdaptive) }
         set {
             defaults.set(newValue, forKey: Self.kAdaptive)
-            NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
-        }
-    }
-
-    /// When on, AppDelegate snapshots the focused window's AX text on Fn-down
-    /// and feeds it to the polish prompt as a "screen context" hint. Off by
-    /// default — adds an AX traversal cost (typically <100 ms) and a measurable
-    /// chunk of system-prompt tokens, both wasted if the user isn't relying on
-    /// proper-noun disambiguation. Independent of `isAdaptiveEnabled`: a user
-    /// who wants screen context but not persona/recent should be able to get
-    /// just the screen layer.
-    var isScreenContextEnabled: Bool {
-        get { defaults.bool(forKey: Self.kScreenContext) }
-        set {
-            defaults.set(newValue, forKey: Self.kScreenContext)
             NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
         }
     }
@@ -229,31 +213,20 @@ final class PolishCoordinator {
     /// After the call, the resulting *final* text — polished if successful,
     /// raw on fallback — is appended to L3 history (also gated by adaptive
     /// mode).
-    func maybePolish(
-        _ raw: String,
-        selectedLocaleCode: String,
-        screenContext: String? = nil
-    ) async -> String {
+    func maybePolish(_ raw: String, selectedLocaleCode: String) async -> String {
         guard let svc = active() else {
             captureFinalIfAdaptive(raw, locale: selectedLocaleCode)
             return raw
         }
 
         let hint = PolishPrompt.languageHint(for: selectedLocaleCode)
-        let trimmedScreen = (screenContext ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedScreen: String? = trimmedScreen.isEmpty ? nil : trimmedScreen
-        // Use the full assembler whenever we have a non-trivial extra layer
-        // to fold in (adaptive persona/recent OR screen context). Falls back
-        // to the bare L1 prompt when neither is present, so existing tests
-        // that exercise the no-context path still match byte-for-byte.
         let systemPrompt: String
-        if isAdaptiveEnabled || resolvedScreen != nil {
+        if isAdaptiveEnabled {
             systemPrompt = PolishPrompt.assemble(
                 languageHint: hint,
                 runtimeContext: nil,                      // Phase 5.3 placeholder
-                screenContext: resolvedScreen,
-                persona: isAdaptiveEnabled ? personaStore.persona : "",
-                recent: isAdaptiveEnabled ? personaStore.recent : []
+                persona: personaStore.persona,
+                recent: personaStore.recent
             )
         } else {
             systemPrompt = PolishPrompt.resolvedSystemPrompt(languageHint: hint)

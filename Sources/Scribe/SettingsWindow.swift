@@ -24,10 +24,6 @@ final class SettingsWindow: NSPanel {
     private let systemDetailLabel = NSTextField(labelWithString: "")
     private let localDetailLabel = NSTextField(labelWithString: "")
 
-    // Screen context (Phase 5.3)
-    private let screenContextCheckbox = NSButton()
-    private let screenContextDetailLabel = NSTextField(labelWithString: "")
-
     // Adaptive (Phase 5.1)
     private let adaptiveCheckbox = NSButton()
     private let adaptiveDetailLabel = NSTextField(labelWithString: "")
@@ -171,28 +167,6 @@ final class SettingsWindow: NSPanel {
         localBlock.spacing = 4
         localBlock.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 0)
 
-        // Screen context section — Phase 5.3
-        screenContextCheckbox.setButtonType(.switch)
-        screenContextCheckbox.title = L10n.t("settings.polish.screenContext.label")
-        screenContextCheckbox.target = self
-        screenContextCheckbox.action = #selector(screenContextToggled)
-
-        screenContextDetailLabel.stringValue = L10n.t("settings.polish.screenContext.detail")
-        screenContextDetailLabel.font = .systemFont(ofSize: 11)
-        screenContextDetailLabel.textColor = .secondaryLabelColor
-        screenContextDetailLabel.lineBreakMode = .byWordWrapping
-        screenContextDetailLabel.maximumNumberOfLines = 0
-        screenContextDetailLabel.preferredMaxLayoutWidth = 500
-
-        let screenContextBlock = NSStackView(views: [
-            screenContextCheckbox,
-            screenContextDetailLabel,
-        ])
-        screenContextBlock.orientation = .vertical
-        screenContextBlock.alignment = .leading
-        screenContextBlock.spacing = 4
-        screenContextBlock.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 0)
-
         // Adaptive section — Phase 5.1
         adaptiveCheckbox.setButtonType(.switch)
         adaptiveCheckbox.title = L10n.t("settings.polish.adaptive.label")
@@ -253,8 +227,6 @@ final class SettingsWindow: NSPanel {
 
         let separator = NSBox()
         separator.boxType = .separator
-        let separator2 = NSBox()
-        separator2.boxType = .separator
 
         let main = NSStackView(views: [
             enableCheckbox,
@@ -263,8 +235,6 @@ final class SettingsWindow: NSPanel {
             systemBlock,
             localBlock,
             separator,
-            screenContextBlock,
-            separator2,
             adaptiveBlock,
         ])
         main.orientation = .vertical
@@ -289,8 +259,6 @@ final class SettingsWindow: NSPanel {
             personaScrollView.trailingAnchor.constraint(equalTo: main.trailingAnchor),
             separator.leadingAnchor.constraint(equalTo: main.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: main.trailingAnchor),
-            separator2.leadingAnchor.constraint(equalTo: main.leadingAnchor),
-            separator2.trailingAnchor.constraint(equalTo: main.trailingAnchor),
 
             bottomBar.topAnchor.constraint(greaterThanOrEqualTo: main.bottomAnchor, constant: 16),
             bottomBar.bottomAnchor.constraint(equalTo: cv.bottomAnchor, constant: -16),
@@ -303,7 +271,6 @@ final class SettingsWindow: NSPanel {
     private func refresh() {
         enableCheckbox.state = coordinator.isEnabled ? .on : .off
         adaptiveCheckbox.state = coordinator.isAdaptiveEnabled ? .on : .off
-        screenContextCheckbox.state = coordinator.isScreenContextEnabled ? .on : .off
 
         // Persona textbox + folder/reset buttons are only meaningful when
         // adaptive is on. Disable rather than hide so the layout doesn't jump.
@@ -415,11 +382,6 @@ final class SettingsWindow: NSPanel {
 
     @objc private func adaptiveToggled() {
         coordinator.isAdaptiveEnabled = (adaptiveCheckbox.state == .on)
-        refresh()
-    }
-
-    @objc private func screenContextToggled() {
-        coordinator.isScreenContextEnabled = (screenContextCheckbox.state == .on)
         refresh()
     }
 
