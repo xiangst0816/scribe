@@ -8,6 +8,12 @@ or polish without behavioural change.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-04-29
+
+A small follow-up to v0.7.0 that walks back two features whose end-to-end
+quality didn't justify their footprint, and tucks the version label
+into the menu where it belongs.
+
 ### Removed
 
 - **Screen-context for polish** (introduced in v0.7.0). In practice the
@@ -315,7 +321,8 @@ same way they did in v0.4.3 — they just behave more reliably.
 - Fixed: UTF-8 split issues in Local backend output.
 - Changed: `n_batch` tuned for the Gemma turn wrapper.
 
-[Unreleased]: https://github.com/xiangst0816/scribe/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/xiangst0816/scribe/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/xiangst0816/scribe/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xiangst0816/scribe/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/xiangst0816/scribe/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/xiangst0816/scribe/compare/v0.4.3...v0.5.0
