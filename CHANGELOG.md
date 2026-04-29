@@ -235,15 +235,15 @@ same way they did in v0.4.3 — they just behave more reliably.
   backed cancellation and a `cancelAndDrain()` for shutdown safety.
   Owned by `LlamaContext`, exercised standalone by
   `CancellableInferenceQueueTests`.
-- **`docs/code-review-2026-04.md`** — the audit that motivated this
-  release. Each item (R1–R4, Y5–Y8, G9–G12) carries symptom, fix, tests
-  to add, and verify checklist.
-- **`docs/y7-actor-reentrancy-audit.md`** — Y7's outcome doc. The
-  audit concluded no code change was needed; the snapshot pattern in
-  `maybePolish` plus the `.polishing` Fn-lock cover every load-bearing
-  reentrancy path. Records the conditions that would invalidate the
-  conclusion (concurrent polishes, mid-session persona derivation,
-  runtime-context fields).
+- **Code-review audit pass.** A first-pass audit of the Refinement
+  module catalogued the bugs fixed in this release as items R1–R4 / Y5–Y8
+  / G9–G12; the working doc was removed in v0.7.1 once every actionable
+  item had shipped. Y7's outcome was a no-code-change actor-reentrancy
+  audit — the snapshot pattern in `maybePolish` plus the `.polishing`
+  Fn-lock cover every load-bearing reentrancy path. The conditions that
+  would invalidate that conclusion (concurrent polishes, mid-session
+  state derivation) are still worth re-checking before any future
+  rework of the polish lifecycle.
 
 ### Deferred
 
@@ -284,9 +284,9 @@ same way they did in v0.4.3 — they just behave more reliably.
 - Changed: local-polish backend swapped from Qwen 2.5-1.5B (~1 GB)
   to Gemma 4 E2B-it Q4_K_M (~3.5 GB). Persona-leak / question-answering /
   multilingual-preservation adversarial cases that Qwen 1.5B failed are
-  handled by Gemma 4 E2B; details in `docs/polish-model-eval.md`.
-  Existing Qwen download lives on disk as an orphan for users who want
-  to roll back; we don't auto-prune.
+  handled by Gemma 4 E2B; the [PolishEval](Tools/PolishEval/) harness
+  reproduces the cases on demand. Existing Qwen download lives on disk
+  as an orphan for users who want to roll back; we don't auto-prune.
 
 ## [0.3.8]
 

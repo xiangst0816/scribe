@@ -69,7 +69,7 @@ idle ──fnDown──▶ recording ──fnUp──▶ armedToStop ──(0.5s
 
 ### Polish (transcript refinement)
 
-Feature is **off by default** and gated behind a Settings master toggle. Two backends, mutually exclusive at runtime: `System` (Apple `FoundationModels`, macOS 26+ in supported regions) and `Local` (Gemma 4 E2B-it via llama.cpp, ~3.5 GB downloaded on first enable). Full design in [docs/local-refinement.md](docs/local-refinement.md), and the candidate-model trade-off in [docs/polish-model-eval.md](docs/polish-model-eval.md). Both backends are implemented; the Local one downloads its model on first enable.
+Feature is **off by default** and gated behind a Settings master toggle. Two backends, mutually exclusive at runtime: `System` (Apple `FoundationModels`, macOS 26+ in supported regions) and `Local` (Gemma 4 E2B-it via llama.cpp, ~3.5 GB downloaded on first enable). Both backends are implemented; the Local one downloads its model on first enable. The eval harness used to validate prompt and model changes lives at [Tools/PolishEval/](Tools/PolishEval/) and is wired into a pre-commit hook (see `scripts/hooks/pre-commit`) for files in the polish path.
 
 | File | Role |
 |---|---|
@@ -82,7 +82,7 @@ Feature is **off by default** and gated behind a Settings master toggle. Two bac
 | [Refinement/Download/ModelLocation.swift](Sources/Scribe/Refinement/Download/ModelLocation.swift) | Canonical paths under `~/Library/Application Support/Scribe/models/` for the pinned GGUF, its `.partial`, and `.partial.meta`. Names are model-agnostic (`modelURL` / `modelIsPresent`) so swapping the pinned build is a single-file change in `ModelDescriptor`. |
 | [Refinement/Download/ModelMirror.swift](Sources/Scribe/Refinement/Download/ModelMirror.swift) | ModelScope / HuggingFace / hf-mirror.com URLs + `ModelMirrorPreference.fallbackChain(forLocaleCode:)` (zh-prefix → ModelScope first, otherwise HuggingFace first). `ModelDescriptor` pins the file name, expected size, and SHA-256. |
 | [Refinement/Download/ModelIntegrity.swift](Sources/Scribe/Refinement/Download/ModelIntegrity.swift) | Streaming SHA-256 (1 MiB chunks in an autoreleasepool — bounded memory even for ~3.5 GB files). |
-| [Refinement/Download/ModelDownloader.swift](Sources/Scribe/Refinement/Download/ModelDownloader.swift) | URLSessionDownloadDelegate. Mirror chain, HTTP `Range:` resume from `.partial`, append-on-206, atomic rename to final path, hash verify on completion. Failure matrix from [docs/local-refinement.md](docs/local-refinement.md) §4.4 (`unreachable` / `mirrorErrors([Int])` / `integrity` / `notPinned` / `diskFull` / `ioError`). Not `@MainActor`; state changes posted to main via `stateChanged`. |
+| [Refinement/Download/ModelDownloader.swift](Sources/Scribe/Refinement/Download/ModelDownloader.swift) | URLSessionDownloadDelegate. Mirror chain, HTTP `Range:` resume from `.partial`, append-on-206, atomic rename to final path, hash verify on completion. Failure cases are surfaced to the UI as `unreachable` / `mirrorErrors([Int])` / `integrity` / `notPinned` / `diskFull` / `ioError`. Not `@MainActor`; state changes posted to main via `stateChanged`. |
 
 UserDefaults keys owned by this module: `polish.enabled` (Bool), `polish.backend` ("system" / "local"), `polish.local.mirror` ("auto" / "modelScope" / "huggingFace" / "hfMirror"). Legacy keys from the deprecated remote-OpenAI path (`llmEnabled`, `llmAPIBaseURL`, `llmAPIKey`, `llmModel`) are scrubbed at startup by `PolishCoordinator.purgeLegacyKeys`.
 
@@ -94,7 +94,7 @@ When bumping the llama.cpp pin: download the new `xcframework.zip`, run `swift p
 
 The Gemma 4 E2B-it Q4_K_M GGUF (~3.46 GB, from `bartowski/google_gemma-4-E2B-it-GGUF`) is **not** bundled in the .app — it's downloaded on first enable into `~/Library/Application Support/Scribe/models/`. The expected size and SHA-256 are pinned in `ModelDescriptor.gemma4_E2B_it_Q4_K_M`; bumping the model is a deliberate product decision. Old files (e.g. the previous `qwen2.5-1.5b-instruct-q4_k_m.gguf` from v0.3.x) are left on disk as orphans for the user to delete manually — we don't auto-prune in case they want to roll back.
 
-The model swap from Qwen2.5-1.5B → Gemma 4 E2B happened in the v0.4.x line. See [docs/polish-model-eval.md](docs/polish-model-eval.md) §Round 1 — Qwen 1.5B failed adversarial cases for persona-leak / question-answering / multilingual-preservation that Gemma 4 E2B handles; the trade-off is ~3× the download size (1 GB → 3.5 GB).
+The model swap from Qwen2.5-1.5B → Gemma 4 E2B happened in the v0.4.x line — Qwen 1.5B failed adversarial cases for persona-leak / question-answering / multilingual-preservation that Gemma 4 E2B handles; the trade-off is ~3× the download size (1 GB → 3.5 GB). The PolishEval harness reproduces these cases on demand.
 
 ### MainActor isolation
 
