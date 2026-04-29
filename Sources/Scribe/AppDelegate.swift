@@ -398,11 +398,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         let title = L10n.t("menu.enabled")
 
         let paragraph = NSMutableParagraphStyle()
-        // 280 pt is wide enough that the right-aligned version pins to the
-        // menu's right edge for every localized polish status string we ship.
-        // If translations grow, bump this rather than letting the version
-        // float in the middle of the row.
-        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 280, options: [:])]
+        // The status-bar dropdown reserves a trailing column for keyEquivalents
+        // ("⌘," / "⌘ Q") that all items share, plus extra inset on the right.
+        // The version label here is rendered as part of the title's text run,
+        // so its right-aligned tab stop pins inside the *title* column — which
+        // ends well to the left of the menu's visible right edge. Setting the
+        // tab stop generously past any natural item width forces the menu to
+        // adopt this width and lands the version flush against the right side.
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 460, options: [:])]
 
         let menuFont = NSFont.menuFont(ofSize: 0)
         let versionFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
