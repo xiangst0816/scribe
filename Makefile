@@ -42,6 +42,7 @@ build:
 	cp $(BUILD_DIR)/$(APP_NAME) $(APP_BUNDLE)/Contents/MacOS/
 	cp Info.plist $(APP_BUNDLE)/Contents/
 	cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/
+	cp Resources/*.png $(APP_BUNDLE)/Contents/Resources/
 	@for b in $(BUILD_DIR)/*.bundle; do \
 		[ -e "$$b" ] && cp -R "$$b" $(APP_BUNDLE)/Contents/Resources/ || true ; \
 	done

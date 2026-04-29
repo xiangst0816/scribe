@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M2 13a2 2 0 0 0 2-2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2-2"
+        stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <animate attributeName="d"
+             values="M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0V20a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0V17a2 2 0 0 0 4 0V13a2 2 0 0 1 2 -2;
+                     M2 13a2 2 0 0 0 2 -2V10a2 2 0 0 1 4 0V17a2 2 0 0 0 4 0V7a2 2 0 0 1 4 0V15a2 2 0 0 0 4 0V13a2 2 0 0 1 2 -2;
+                     M2 13a2 2 0 0 0 2 -2V5a2 2 0 0 1 4 0V17a2 2 0 0 0 4 0V9a2 2 0 0 1 4 0V19a2 2 0 0 0 4 0V13a2 2 0 0 1 2 -2;
+                     M2 13a2 2 0 0 0 2 -2V11a2 2 0 0 1 4 0V16a2 2 0 0 0 4 0V10a2 2 0 0 1 4 0V14a2 2 0 0 0 4 0V13a2 2 0 0 1 2 -2;
+                     M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0V20a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0V17a2 2 0 0 0 4 0V13a2 2 0 0 1 2 -2"
+             dur="1.6s"
+             repeatCount="indefinite"/>
+  </path>
+</svg>

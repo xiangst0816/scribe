@@ -46,6 +46,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// before they finish their sentence; this preserves those last words.
     private static let trailingBufferSeconds: TimeInterval = 0.5
 
+    /// Per-frame delay for the menu-bar recording animation. 4 frames × 0.4s
+    /// ≈ 1.6s loop — feels alive without buzzing.
+    private static let recordingFrameInterval: TimeInterval = 0.4
+
+    private var menubarIdleImage: NSImage?
+    private var menubarRecordingFrames: [NSImage] = []
+    private var recordingAnimationTimer: Timer?
+    private var recordingFrameIndex = 0
+
     private var enableMenuItem: NSMenuItem!
     private var langMenuItem: NSMenuItem!
     private var systemDefaultLangItem: NSMenuItem!
@@ -285,6 +294,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     private func setupStatusBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        loadMenubarImages()
         updateStatusIcon()
 
         let menu = NSMenu()
@@ -490,27 +500,66 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         button.contentTintColor = nil  // always inherit menu-bar foreground
         button.title = ""
 
-        let symbolName: String
-        let description: String
         switch sessionState {
-        case .idle:
-            symbolName = "mic.fill"
-            description = "Voice Input"
         case .recording, .armedToStop:
-            symbolName = "mic.fill"
-            description = "Recording"
-        case .transcribing:
-            symbolName = "waveform"
-            description = "Transcribing"
-        case .polishing:
-            // Same icon as transcribing — visually conveys "still processing"
-            // without inventing a new symbol the user has to learn.
-            symbolName = "waveform"
-            description = "Polishing"
+            startRecordingAnimation()
+        case .idle, .transcribing, .polishing:
+            stopRecordingAnimation()
+            button.image = menubarIdleImage
         }
-        let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)
-        img?.isTemplate = true
-        button.image = img
+    }
+
+    private func loadMenubarImages() {
+        // NSImage(named:) finds @1x and @2x reps for files in the bundle's
+        // Resources directory and combines them into one image. Falls back to
+        // an SF Symbol if the bundled assets are missing — the app should
+        // never end up with an invisible status item.
+        let idle = NSImage(named: "MenubarIdle")
+            ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: "Voice Input")
+        idle?.isTemplate = true
+        menubarIdleImage = idle
+
+        menubarRecordingFrames = (1...4).compactMap { i in
+            let img = NSImage(named: "MenubarRecording\(i)")
+            img?.isTemplate = true
+            return img
+        }
+    }
+
+    private func startRecordingAnimation() {
+        // Idempotent: state transitions recording → armedToStop also call
+        // updateStatusIcon, but the animation should run continuously across
+        // both. Bail if the timer is already ticking.
+        if recordingAnimationTimer != nil { return }
+        guard !menubarRecordingFrames.isEmpty else {
+            statusItem.button?.image = menubarIdleImage
+            return
+        }
+        recordingFrameIndex = 0
+        statusItem.button?.image = menubarRecordingFrames[0]
+        let timer = Timer.scheduledTimer(
+            timeInterval: Self.recordingFrameInterval,
+            target: self,
+            selector: #selector(advanceRecordingFrame),
+            userInfo: nil,
+            repeats: true
+        )
+        // Without .common mode, the animation freezes whenever the menu-bar
+        // menu is open (NSMenu pushes the run loop into .eventTracking).
+        RunLoop.main.add(timer, forMode: .common)
+        recordingAnimationTimer = timer
+    }
+
+    private func stopRecordingAnimation() {
+        recordingAnimationTimer?.invalidate()
+        recordingAnimationTimer = nil
+        recordingFrameIndex = 0
+    }
+
+    @objc private func advanceRecordingFrame() {
+        guard !menubarRecordingFrames.isEmpty else { return }
+        recordingFrameIndex = (recordingFrameIndex + 1) % menubarRecordingFrames.count
+        statusItem.button?.image = menubarRecordingFrames[recordingFrameIndex]
     }
 
     // MARK: - Actions
