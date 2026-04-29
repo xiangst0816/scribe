@@ -136,84 +136,10 @@ enum PolishPrompt {
         }
     }
 
-    /// Substitute `{{language_hint}}` into the system prompt. Returns just
-    /// the L1 (fixed) prompt — no persona / recent layers. Useful for tests
-    /// and as a backstop when the adaptive feature is off.
+    /// Substitute `{{language_hint}}` into the system prompt. The single
+    /// system prompt every backend feeds to its model.
     static func resolvedSystemPrompt(languageHint: String) -> String {
         system.replacingOccurrences(of: "{{language_hint}}", with: languageHint)
-    }
-
-    /// Assemble the full system prompt from all available layers. Layers
-    /// follow the L1 / R / L2 / L3 design in [docs/adaptive-polish.md].
-    /// Empty `persona` / `recent` cause the corresponding layers to be
-    /// elided entirely so we don't show "About the user: <empty>" to the
-    /// model.
-    ///
-    /// `runtimeContext` is the placeholder for Phase 5.3's per-app tone;
-    /// pass `nil` (or empty) until then.
-    static func assemble(
-        languageHint: String,
-        runtimeContext: String? = nil,
-        persona: String = "",
-        recent: [PersonaStore.Entry] = []
-    ) -> String {
-        var blocks: [String] = []
-
-        // L1 — fixed core.
-        blocks.append(resolvedSystemPrompt(languageHint: languageHint))
-
-        // R — runtime context (Phase 5.3 placeholder; usually empty).
-        if let runtimeContext, !runtimeContext.isEmpty {
-            blocks.append("Current context: " + runtimeContext)
-        }
-
-        // L2 — who the user is. Critical: framed as STYLE-ONLY reference.
-        // A 1.5B model will otherwise happily mine persona facts to "answer"
-        // any question-shaped dictation that asks about the user (e.g.
-        // persona "I am Alice" + dictation "who am I?" → naive output
-        // "You are Alice"). Persona must NEVER be used as factual ammo.
-        let trimmedPersona = persona.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedPersona.isEmpty {
-            blocks.append("""
-                Style reference — about the user (READ-ONLY, NOT ANSWER FODDER):
-                The block below describes the user in their own words. Use it
-                ONLY to infer their voice, register, vocabulary, and language
-                preferences when polishing. **Never quote it. Never use any
-                fact in it to answer or react to the dictation, even when the
-                dictation contains a question whose answer is sitting right
-                here.** The user is asking you to clean up their text, never
-                to identify them or talk to them.
-
-                ✗ WRONG (this is the failure mode this section exists to prevent):
-                  persona says "我是向松涛"
-                  dictation: "你知道我是谁吗"
-                  bad output: "我知道你是向松涛。"   ← uses persona to answer
-                  good output: "你知道我是谁吗？"   ← polished, not answered
-
-                ---
-                \(trimmedPersona)
-                ---
-                """)
-        }
-
-        // L3 — most recent final outputs as voice examples. Same NEVER-COPY
-        // framing because few-shot leakage from these would be even worse
-        // (these are the user's literal recent words; copying them into a
-        // new polish output would look like Scribe is hallucinating).
-        if !recent.isEmpty {
-            let bulletList = recent.map { "- \"\($0.text)\"" }.joined(separator: "\n")
-            blocks.append("""
-                Recent writing samples — VOICE REFERENCE ONLY (do not copy phrases):
-                Past polished outputs, illustrating the user's preferred phrasing
-                and rhythm. Match this voice when polishing the new dictation.
-                **Never paste any of these phrases into the new output unless
-                they actually appeared in the new raw text.**
-
-                \(bulletList)
-                """)
-        }
-
-        return blocks.joined(separator: "\n\n")
     }
 
     /// Looks like the engine prepended a verbose preface ("Sure, here's the

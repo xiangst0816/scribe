@@ -24,6 +24,29 @@ or polish without behavioural change.
   unrelated `n_batch=n_ctx` bump in [LlamaContext.swift](Sources/Scribe/Refinement/LlamaContext.swift)
   stays — it's still the right configuration even without long screen
   contexts pushing the prompt.
+- **Adaptive polish (persona + recent-history voice reference)**
+  (Phase 5.1, shipped in v0.5.x line). The L2 (user-written persona)
+  and L3 (last-five-finished-outputs) prompt layers added complexity
+  without a measurable polish-quality win that justified storing
+  transcript text on disk. Removed: `PersonaStore` + tests + design
+  doc, the `polish.adaptive.enabled` UserDefaults key, the
+  `isAdaptiveEnabled` toggle, the entire Settings "Adapt to my voice"
+  block (checkbox, persona text view, "Open Scribe folder" + "Reset"
+  buttons, save-on-edit debounce), the `persona` / `recent` parameters
+  on `PolishPrompt.assemble`, and the `personaStore` injection on
+  `PolishCoordinator`. `PolishPrompt.assemble` itself is gone — the
+  remaining single layer is the L1 fixed prompt, exposed directly via
+  `PolishPrompt.resolvedSystemPrompt(languageHint:)`. Localized strings
+  removed across all 5 langs.
+
+### Changed
+
+- **Menu bar version display.** The disabled "Scribe v0.6.0" item near
+  the bottom of the status menu is gone; the version now appears
+  right-aligned next to the "启用 / Enabled" toggle at the top, in
+  smaller dimmer text. Built via `NSAttributedString` with a tab stop
+  on the menu item's `attributedTitle`, so the layout doesn't fight
+  the native checkmark column.
 
 ## [0.7.0] — 2026-04-28
 

@@ -26,8 +26,8 @@ protocol PolishService: AnyObject {
     /// success is a no-op.
     func warmUp() async throws
     /// Run inference. The caller (PolishCoordinator) is responsible for:
-    /// (a) assembling `systemPrompt` from L1 / R / L2 / L3 layers via
-    ///     `PolishPrompt.assemble`, and
+    /// (a) resolving `systemPrompt` via `PolishPrompt.resolvedSystemPrompt`,
+    ///     and
     /// (b) wrapping this call in the 3 s timeout + breaker.
     /// Backends are pure plumbing — they take a fully-formed system prompt
     /// and a raw user message, do inference, return the polished string.
