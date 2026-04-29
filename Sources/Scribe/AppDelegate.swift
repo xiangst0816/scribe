@@ -344,11 +344,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         menu.addItem(.separator())
 
         // Polish status (read-only; clicking opens the Settings window).
-        polishStatusMenuItem = NSMenuItem(title: "", action: #selector(openSettings), keyEquivalent: "")
+        polishStatusMenuItem = NSMenuItem(title: "", action: #selector(openScribeSettings), keyEquivalent: "")
         polishStatusMenuItem.target = self
         menu.addItem(polishStatusMenuItem)
 
-        settingsMenuItem = NSMenuItem(title: L10n.t("menu.settings"), action: #selector(openSettings), keyEquivalent: ",")
+        settingsMenuItem = NSMenuItem(title: L10n.t("menu.settings"), action: #selector(openScribeSettings), keyEquivalent: ",")
         settingsMenuItem.target = self
         menu.addItem(settingsMenuItem)
 
@@ -398,7 +398,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         let title = L10n.t("menu.enabled")
 
         let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 180, options: [:])]
+        // 280 pt is wide enough that the right-aligned version pins to the
+        // menu's right edge for every localized polish status string we ship.
+        // If translations grow, bump this rather than letting the version
+        // float in the middle of the row.
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 280, options: [:])]
 
         let menuFont = NSFont.menuFont(ofSize: 0)
         let versionFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
@@ -514,14 +518,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         // Resources directory and combines them into one image. Falls back to
         // an SF Symbol if the bundled assets are missing — the app should
         // never end up with an invisible status item.
+        //
+        // We force size to 18×18 pt so the icon visually matches Apple's
+        // built-in status-bar items (Battery, Wi-Fi, Volume). The PNGs ship at
+        // 22/44 px so macOS still has enough resolution to downscale cleanly.
+        let menubarIconSize = NSSize(width: 18, height: 18)
+
         let idle = NSImage(named: "MenubarIdle")
             ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: "Voice Input")
         idle?.isTemplate = true
+        idle?.size = menubarIconSize
         menubarIdleImage = idle
 
         menubarRecordingFrames = (1...4).compactMap { i in
             let img = NSImage(named: "MenubarRecording\(i)")
             img?.isTemplate = true
+            img?.size = menubarIconSize
             return img
         }
     }
@@ -619,7 +631,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         NSApp.terminate(nil)
     }
 
-    @objc private func openSettings() {
+    @objc private func openScribeSettings() {
         if settingsWindow == nil {
             settingsWindow = SettingsWindow(coordinator: polishCoordinator)
         }
