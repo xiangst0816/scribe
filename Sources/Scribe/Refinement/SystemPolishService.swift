@@ -74,15 +74,11 @@ final class SystemPolishService: PolishService {
         if #available(macOS 26.0, *) {
 #if canImport(FoundationModels)
             // Rebuild the session whenever the prompt content changes — Apple
-            // FM bakes instructions into the session at construction. The
-            // pre-Y6 cache key was `count:prefix(16)…suffix(16)`, which
-            // collides easily once L2/L3 (persona / recent) layers are
-            // appended: the L1 prompt is ~3 KB and identical across calls,
-            // so the count varies only with persona length and the bookends
-            // are always the L1 ones. Two distinct adaptive prompts of equal
-            // length would collide and reuse the wrong-instructed session.
-            // SHA-256 is not cryptographically meaningful here; we just need
-            // a low-collision summary to compare across calls.
+            // FM bakes instructions into the session at construction, and
+            // the prompt's `{{language_hint}}` substitution varies the
+            // content across dictation-locale switches. SHA-256 is not
+            // cryptographically meaningful here; we just need a low-
+            // collision summary to compare across calls.
             let key = Self.promptCacheKey(systemPrompt)
             if sessionPromptKey != key || !(session is LanguageModelSession) {
                 buildSession(systemPrompt: systemPrompt)

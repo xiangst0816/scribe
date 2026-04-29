@@ -24,24 +24,7 @@ final class SettingsWindow: NSPanel {
     private let systemDetailLabel = NSTextField(labelWithString: "")
     private let localDetailLabel = NSTextField(labelWithString: "")
 
-    // Adaptive (Phase 5.1)
-    private let adaptiveCheckbox = NSButton()
-    private let adaptiveDetailLabel = NSTextField(labelWithString: "")
-    private let personaLabel = NSTextField(labelWithString: "")
-    private let personaTextView = NSTextView()
-    private lazy var personaScrollView: NSScrollView = {
-        let s = NSScrollView()
-        s.hasVerticalScroller = true
-        s.borderType = .lineBorder
-        s.documentView = personaTextView
-        s.translatesAutoresizingMaskIntoConstraints = false
-        return s
-    }()
-    private let openFolderButton = NSButton()
-    private let resetAdaptiveButton = NSButton()
-
     private var observer: NSObjectProtocol?
-    private var personaSaveTimer: Timer?
 
     init(coordinator: PolishCoordinator) {
         self.coordinator = coordinator
@@ -167,75 +150,12 @@ final class SettingsWindow: NSPanel {
         localBlock.spacing = 4
         localBlock.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 0)
 
-        // Adaptive section — Phase 5.1
-        adaptiveCheckbox.setButtonType(.switch)
-        adaptiveCheckbox.title = L10n.t("settings.polish.adaptive.label")
-        adaptiveCheckbox.target = self
-        adaptiveCheckbox.action = #selector(adaptiveToggled)
-
-        adaptiveDetailLabel.stringValue = L10n.t("settings.polish.adaptive.detail")
-        adaptiveDetailLabel.font = .systemFont(ofSize: 11)
-        adaptiveDetailLabel.textColor = .secondaryLabelColor
-        adaptiveDetailLabel.lineBreakMode = .byWordWrapping
-        adaptiveDetailLabel.maximumNumberOfLines = 0
-        adaptiveDetailLabel.preferredMaxLayoutWidth = 500
-
-        personaLabel.stringValue = L10n.t("settings.polish.adaptive.persona")
-        personaLabel.font = .systemFont(ofSize: 11)
-        personaLabel.textColor = .secondaryLabelColor
-
-        personaTextView.font = .systemFont(ofSize: 12)
-        personaTextView.isEditable = true
-        personaTextView.isRichText = false
-        personaTextView.isAutomaticQuoteSubstitutionEnabled = false
-        personaTextView.isAutomaticDashSubstitutionEnabled = false
-        personaTextView.delegate = self
-        personaTextView.string = coordinator.personaStore.persona
-        // Belt-and-suspenders text-color setup. `textColor` paints existing
-        // characters; `typingAttributes` controls what NEW typed characters
-        // look like. Without setting both, NSTextView may render typed
-        // characters with a foreground color that's invisible against the
-        // current appearance — that bug shipped in v0.3.4.
-        applyPersonaTextColor()
-        personaScrollView.heightAnchor.constraint(equalToConstant: 96).isActive = true
-
-        openFolderButton.title = L10n.t("settings.polish.adaptive.openFolder")
-        openFolderButton.bezelStyle = .rounded
-        openFolderButton.target = self
-        openFolderButton.action = #selector(openScribeFolder)
-
-        resetAdaptiveButton.title = L10n.t("settings.polish.adaptive.reset")
-        resetAdaptiveButton.bezelStyle = .rounded
-        resetAdaptiveButton.target = self
-        resetAdaptiveButton.action = #selector(resetAdaptiveData)
-
-        let adaptiveButtonRow = NSStackView(views: [openFolderButton, resetAdaptiveButton])
-        adaptiveButtonRow.orientation = .horizontal
-        adaptiveButtonRow.spacing = 8
-
-        let adaptiveBlock = NSStackView(views: [
-            adaptiveCheckbox,
-            adaptiveDetailLabel,
-            personaLabel,
-            personaScrollView,
-            adaptiveButtonRow,
-        ])
-        adaptiveBlock.orientation = .vertical
-        adaptiveBlock.alignment = .leading
-        adaptiveBlock.spacing = 6
-        adaptiveBlock.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 0)
-
-        let separator = NSBox()
-        separator.boxType = .separator
-
         let main = NSStackView(views: [
             enableCheckbox,
             descriptionLabel,
             engineHeader,
             systemBlock,
             localBlock,
-            separator,
-            adaptiveBlock,
         ])
         main.orientation = .vertical
         main.alignment = .leading
@@ -254,12 +174,6 @@ final class SettingsWindow: NSPanel {
             main.leadingAnchor.constraint(equalTo: cv.leadingAnchor, constant: 20),
             main.trailingAnchor.constraint(equalTo: cv.trailingAnchor, constant: -20),
 
-            // The persona text area should fill horizontally.
-            personaScrollView.leadingAnchor.constraint(equalTo: adaptiveBlock.leadingAnchor),
-            personaScrollView.trailingAnchor.constraint(equalTo: main.trailingAnchor),
-            separator.leadingAnchor.constraint(equalTo: main.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: main.trailingAnchor),
-
             bottomBar.topAnchor.constraint(greaterThanOrEqualTo: main.bottomAnchor, constant: 16),
             bottomBar.bottomAnchor.constraint(equalTo: cv.bottomAnchor, constant: -16),
             bottomBar.trailingAnchor.constraint(equalTo: cv.trailingAnchor, constant: -20),
@@ -270,16 +184,6 @@ final class SettingsWindow: NSPanel {
 
     private func refresh() {
         enableCheckbox.state = coordinator.isEnabled ? .on : .off
-        adaptiveCheckbox.state = coordinator.isAdaptiveEnabled ? .on : .off
-
-        // Persona textbox + folder/reset buttons are only meaningful when
-        // adaptive is on. Disable rather than hide so the layout doesn't jump.
-        let adaptiveOn = coordinator.isAdaptiveEnabled
-        personaTextView.isEditable = adaptiveOn
-        applyPersonaTextColor()
-        openFolderButton.isEnabled = adaptiveOn
-        resetAdaptiveButton.isEnabled = adaptiveOn
-        personaLabel.textColor = adaptiveOn ? .secondaryLabelColor : .tertiaryLabelColor
 
         // Status under each radio — reflects backend.statusText verbatim.
         systemStatusLabel.stringValue = L10n.t("settings.polish.statusPrefix") + coordinator.system.statusText
@@ -380,83 +284,7 @@ final class SettingsWindow: NSPanel {
         coordinator.purgeLocalModel()
     }
 
-    @objc private func adaptiveToggled() {
-        coordinator.isAdaptiveEnabled = (adaptiveCheckbox.state == .on)
-        refresh()
-    }
-
-    /// Set both the existing-text color (`textColor`) AND the new-typed-text
-    /// color (`typingAttributes`) on the persona text view. NSTextView keeps
-    /// these as independent properties; setting only `textColor` leaves
-    /// already-empty / freshly-typed text using whatever the typing
-    /// attributes default to (which is appearance-dependent and was rendering
-    /// as effectively-invisible in v0.3.4).
-    private func applyPersonaTextColor() {
-        let color: NSColor = coordinator.isAdaptiveEnabled
-            ? .labelColor
-            : .disabledControlTextColor
-        personaTextView.textColor = color
-        personaTextView.typingAttributes = [
-            .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: color,
-        ]
-    }
-
-    @objc private func openScribeFolder() {
-        ModelLocation.ensureModelsDirectoryExists()
-        NSWorkspace.shared.activateFileViewerSelecting([ModelLocation.supportDirectory])
-    }
-
-    @objc private func resetAdaptiveData() {
-        // Confirm before destroying — the persona is hand-written by the user
-        // and the recent history is the only source of truth. Open-folder is
-        // also available for users who want to inspect first.
-        let alert = NSAlert()
-        alert.messageText = L10n.t("settings.polish.adaptive.resetConfirm.title")
-        alert.informativeText = L10n.t("settings.polish.adaptive.resetConfirm.body")
-        alert.alertStyle = .warning
-        let confirmButton = alert.addButton(
-            withTitle: L10n.t("settings.polish.adaptive.resetConfirm.confirm")
-        )
-        // The destructive button needs to be visually distinct; the default
-        // button (the rightmost / Return-key one) should be Cancel here.
-        confirmButton.hasDestructiveAction = true
-        alert.addButton(withTitle: L10n.t("settings.polish.adaptive.resetConfirm.cancel"))
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-
-        coordinator.personaStore.purgeAll()
-        personaTextView.string = ""
-        applyPersonaTextColor()
-    }
-
     @objc private func closeWindow() {
         close()
-    }
-}
-
-// MARK: - Persona text-view debounce
-
-extension SettingsWindow: NSTextViewDelegate {
-    /// Persist the persona on every edit, debounced 500 ms so we don't hit the
-    /// disk on every keystroke. Hard cap is enforced by PersonaStore.
-    ///
-    /// Registered for `.common` modes so the timer still fires when the run
-    /// loop is in `eventTracking` / `modalPanel` (e.g. an NSAlert pops while
-    /// the user is mid-edit). With the default-only registration the
-    /// 500 ms tick gets delayed across modal mode and a Cmd-Q from inside
-    /// the alert would drop the most recent edit (G12).
-    func textDidChange(_ notification: Notification) {
-        personaSaveTimer?.invalidate()
-        let snapshot = personaTextView.string
-        let timer = Timer(timeInterval: 0.5, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            MainActor.assumeIsolated {
-                _ = self.coordinator.personaStore.setPersona(snapshot)
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        personaSaveTimer = timer
     }
 }

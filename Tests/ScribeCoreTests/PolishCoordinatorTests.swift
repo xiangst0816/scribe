@@ -168,54 +168,6 @@ final class PolishCoordinatorTests {
         #expect(!coordinator.isBreakerTripped)
     }
 
-    // MARK: - Adaptive (Phase 5.1)
-
-    @Test func adaptiveCaptureIsGatedOnToggle() async {
-        // Use a separate persona store so we don't pollute the user's real one.
-        let suiteName = "ScribeTests-adaptive-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        let persona = PersonaStore.shared
-        persona.purgeAll()
-        defer { persona.purgeAll() }
-
-        let coord = PolishCoordinator(defaults: defaults, personaStore: persona)
-        coord.isEnabled = true
-        coord.injectStubService(StubReturning("polished result"), as: .local)
-        coord.selectedBackend = .local
-
-        // Adaptive OFF — nothing gets recorded even on success.
-        coord.isAdaptiveEnabled = false
-        _ = await coord.maybePolish("hello", selectedLocaleCode: "en-US")
-        #expect(persona.recent.count == 0)
-
-        // Adaptive ON — the polished output gets captured.
-        coord.isAdaptiveEnabled = true
-        _ = await coord.maybePolish("hello again", selectedLocaleCode: "en-US")
-        #expect(persona.recent.count == 1)
-        #expect(persona.recent[0].text == "polished result")
-    }
-
-    @Test func adaptiveCapturesRawOnPolishFallback() async {
-        let suiteName = "ScribeTests-fallback-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        let persona = PersonaStore.shared
-        persona.purgeAll()
-        defer { persona.purgeAll() }
-
-        let coord = PolishCoordinator(defaults: defaults, personaStore: persona)
-        coord.isEnabled = true
-        coord.isAdaptiveEnabled = true
-        coord.injectStubService(StubFailingService(), as: .local)
-        coord.selectedBackend = .local
-
-        let result = await coord.maybePolish("the user spoke this", selectedLocaleCode: "en-US")
-        // Polish failed → coordinator returns raw → raw is what got "pasted",
-        // and that's what L3 records.
-        #expect(result == "the user spoke this")
-        #expect(persona.recent.count == 1)
-        #expect(persona.recent[0].text == "the user spoke this")
-    }
-
     @Test func purgeLegacyKeysClearsOldDefaults() {
         let suiteName = "ScribeTests-legacy-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -10,12 +10,7 @@ public enum PolishEvalAPI {
     ) async throws -> String {
         let svc = Self.shared
         try await svc.warmUp()
-        let prompt = PolishPrompt.assemble(
-            languageHint: languageHint,
-            runtimeContext: nil,
-            persona: "",
-            recent: []
-        )
+        let prompt = PolishPrompt.resolvedSystemPrompt(languageHint: languageHint)
         return try await svc.polish(raw, systemPrompt: prompt)
     }
 

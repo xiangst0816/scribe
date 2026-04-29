@@ -292,6 +292,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         enableMenuItem = NSMenuItem(title: L10n.t("menu.enabled"), action: #selector(toggleEnabled), keyEquivalent: "")
         enableMenuItem.target = self
         enableMenuItem.state = .on
+        enableMenuItem.attributedTitle = enableMenuItemAttributedTitle()
         menu.addItem(enableMenuItem)
 
         menu.addItem(.separator())
@@ -357,11 +358,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
         menu.addItem(.separator())
 
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let versionItem = NSMenuItem(title: "Scribe v\(version)", action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
-        menu.addItem(versionItem)
-
         quitMenuItem = NSMenuItem(title: L10n.t("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quitMenuItem.target = self
         menu.addItem(quitMenuItem)
@@ -372,6 +368,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// Re-apply current localization to all static menu titles.
     private func relocalizeStaticMenu() {
         enableMenuItem?.title = L10n.t("menu.enabled")
+        enableMenuItem?.attributedTitle = enableMenuItemAttributedTitle()
         langMenuItem?.title = L10n.t("menu.language")
         micMenuItem?.title = L10n.t("menu.microphone")
         quitMenuItem?.title = L10n.t("menu.quit")
@@ -379,6 +376,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         settingsMenuItem?.title = L10n.t("menu.settings")
         rebuildMicrophoneSubmenu()
         refreshPolishMenuItem()
+    }
+
+    /// Build the "Enabled  v0.6.0" attributed title for the top menu item:
+    /// localized "启用" left-aligned, version pinned to a right-aligned tab
+    /// stop in dimmer/smaller text. The tab-stop location is wide enough
+    /// (180 pt) that the version sits near the right edge of the typical
+    /// Scribe menu without forcing the menu wider than its other items.
+    private func enableMenuItemAttributedTitle() -> NSAttributedString {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let title = L10n.t("menu.enabled")
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 180, options: [:])]
+
+        let menuFont = NSFont.menuFont(ofSize: 0)
+        let versionFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: title, attributes: [
+            .font: menuFont,
+            .paragraphStyle: paragraph,
+        ]))
+        attr.append(NSAttributedString(string: "\tv\(version)", attributes: [
+            .font: versionFont,
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .paragraphStyle: paragraph,
+        ]))
+        return attr
     }
 
     // MARK: - Microphone submenu

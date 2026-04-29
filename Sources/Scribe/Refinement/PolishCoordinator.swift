@@ -36,24 +36,9 @@ final class PolishCoordinator {
 
     // MARK: - Persistence
 
-    private static let kEnabled  = "polish.enabled"
-    private static let kBackend  = "polish.backend"
-    private static let kMirror   = "polish.local.mirror"
-    private static let kAdaptive = "polish.adaptive.enabled"
-
-    /// Adaptive (Phase 5.1): when on, the assembled system prompt includes
-    /// L2 (persona) + L3 (recent finished writing) on every polish call, and
-    /// every successfully-pasted text gets appended to L3 history. Default
-    /// off — until the user opts in, no transcript text gets persisted.
-    var isAdaptiveEnabled: Bool {
-        get { defaults.bool(forKey: Self.kAdaptive) }
-        set {
-            defaults.set(newValue, forKey: Self.kAdaptive)
-            NotificationCenter.default.post(name: .polishAvailabilityChanged, object: self)
-        }
-    }
-
-    let personaStore: PersonaStore
+    private static let kEnabled = "polish.enabled"
+    private static let kBackend = "polish.backend"
+    private static let kMirror  = "polish.local.mirror"
 
     /// Mirror preference for the Local backend's download. Default is `.auto`,
     /// which the downloader resolves against the user's current dictation locale.
@@ -125,13 +110,11 @@ final class PolishCoordinator {
     init(
         system: PolishService? = nil,
         local: PolishService? = nil,
-        defaults: UserDefaults = .standard,
-        personaStore: PersonaStore? = nil
+        defaults: UserDefaults = .standard
     ) {
         self.system = system ?? SystemPolishService()
         self.local  = local  ?? LocalPolishService()
         self.defaults = defaults
-        self.personaStore = personaStore ?? PersonaStore.shared
     }
 
     /// Test-only convenience to keep the call sites in tests readable.
@@ -207,39 +190,21 @@ final class PolishCoordinator {
     /// length explosion, breaker tripped, no active backend) returns `raw`
     /// unchanged so the caller can paste *something*. The caller doesn't need
     /// any error handling.
-    ///
-    /// The assembled system prompt includes L2 (persona) + L3 (recent
-    /// finished writing) when adaptive mode is on, plus the L1 fixed prompt.
-    /// After the call, the resulting *final* text — polished if successful,
-    /// raw on fallback — is appended to L3 history (also gated by adaptive
-    /// mode).
     func maybePolish(_ raw: String, selectedLocaleCode: String) async -> String {
         guard let svc = active() else {
-            captureFinalIfAdaptive(raw, locale: selectedLocaleCode)
             return raw
         }
 
         let hint = PolishPrompt.languageHint(for: selectedLocaleCode)
-        let systemPrompt: String
-        if isAdaptiveEnabled {
-            systemPrompt = PolishPrompt.assemble(
-                languageHint: hint,
-                runtimeContext: nil,                      // Phase 5.3 placeholder
-                persona: personaStore.persona,
-                recent: personaStore.recent
-            )
-        } else {
-            systemPrompt = PolishPrompt.resolvedSystemPrompt(languageHint: hint)
-        }
+        let systemPrompt = PolishPrompt.resolvedSystemPrompt(languageHint: hint)
 
-        let final: String
         do {
             let polished = try await withTimeout(seconds: Self.timeoutSeconds) {
                 try await svc.polish(raw, systemPrompt: systemPrompt)
             }
             try validate(polished, against: raw)
             recordSuccess()
-            final = polished
+            return polished
         } catch PolishError.timeout {
             // Timeout is a transient performance signal, not a hard failure.
             // Quietly fall back to the raw transcript and DO NOT increment
@@ -249,21 +214,11 @@ final class PolishCoordinator {
             // output) still trip the breaker via the catch-all below.
             NSLog("Scribe polish timeout (>%.1fs); pasting raw", Self.timeoutSeconds)
             recordTimeout()
-            final = raw
+            return raw
         } catch {
             recordFailure(error.localizedDescription)
-            final = raw
+            return raw
         }
-        captureFinalIfAdaptive(final, locale: selectedLocaleCode)
-        return final
-    }
-
-    /// Append the just-pasted final text to L3 history. No-op if adaptive
-    /// mode is off — that's the privacy gate. The user opted into Polish but
-    /// not into having Scribe remember anything.
-    private func captureFinalIfAdaptive(_ text: String, locale: String) {
-        guard isAdaptiveEnabled else { return }
-        personaStore.recordFinalText(text, languageCode: locale)
     }
 
     /// Reject empty / nonsense / runaway outputs — fall back to raw. Length
