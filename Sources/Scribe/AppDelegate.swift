@@ -302,7 +302,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         enableMenuItem = NSMenuItem(title: L10n.t("menu.enabled"), action: #selector(toggleEnabled), keyEquivalent: "")
         enableMenuItem.target = self
         enableMenuItem.state = .on
-        enableMenuItem.attributedTitle = enableMenuItemAttributedTitle()
         menu.addItem(enableMenuItem)
 
         menu.addItem(.separator())
@@ -368,7 +367,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
         menu.addItem(.separator())
 
-        quitMenuItem = NSMenuItem(title: L10n.t("menu.quit"), action: #selector(quit), keyEquivalent: "q")
+        quitMenuItem = NSMenuItem(title: quitMenuItemTitle(), action: #selector(quit), keyEquivalent: "q")
         quitMenuItem.target = self
         menu.addItem(quitMenuItem)
 
@@ -378,49 +377,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// Re-apply current localization to all static menu titles.
     private func relocalizeStaticMenu() {
         enableMenuItem?.title = L10n.t("menu.enabled")
-        enableMenuItem?.attributedTitle = enableMenuItemAttributedTitle()
         langMenuItem?.title = L10n.t("menu.language")
         micMenuItem?.title = L10n.t("menu.microphone")
-        quitMenuItem?.title = L10n.t("menu.quit")
+        quitMenuItem?.title = quitMenuItemTitle()
         systemDefaultLangItem?.title = L10n.t("menu.systemDefault")
         settingsMenuItem?.title = L10n.t("menu.settings")
         rebuildMicrophoneSubmenu()
         refreshPolishMenuItem()
     }
 
-    /// Build the "Enabled  v0.6.0" attributed title for the top menu item:
-    /// localized "启用" left-aligned, version pinned to a right-aligned tab
-    /// stop in dimmer/smaller text. The tab-stop location is wide enough
-    /// (180 pt) that the version sits near the right edge of the typical
-    /// Scribe menu without forcing the menu wider than its other items.
-    private func enableMenuItemAttributedTitle() -> NSAttributedString {
+    /// Title for the Quit menu item, with the bundle version appended in
+    /// parens. Putting the version here instead of on the "Enabled" row
+    /// avoids fighting AppKit's title / keyEquivalent column layout — the
+    /// version becomes part of the title text and AppKit measures the menu
+    /// width naturally.
+    private func quitMenuItemTitle() -> String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let title = L10n.t("menu.enabled")
-
-        let paragraph = NSMutableParagraphStyle()
-        // The status-bar dropdown reserves a trailing column for keyEquivalents
-        // ("⌘," / "⌘ Q") that all items share, plus extra inset on the right.
-        // The version label here is rendered as part of the title's text run,
-        // so its right-aligned tab stop pins inside the *title* column — which
-        // ends well to the left of the menu's visible right edge. Setting the
-        // tab stop generously past any natural item width forces the menu to
-        // adopt this width and lands the version flush against the right side.
-        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 460, options: [:])]
-
-        let menuFont = NSFont.menuFont(ofSize: 0)
-        let versionFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-
-        let attr = NSMutableAttributedString()
-        attr.append(NSAttributedString(string: title, attributes: [
-            .font: menuFont,
-            .paragraphStyle: paragraph,
-        ]))
-        attr.append(NSAttributedString(string: "\tv\(version)", attributes: [
-            .font: versionFont,
-            .foregroundColor: NSColor.tertiaryLabelColor,
-            .paragraphStyle: paragraph,
-        ]))
-        return attr
+        return "\(L10n.t("menu.quit")) (v\(version))"
     }
 
     // MARK: - Microphone submenu
